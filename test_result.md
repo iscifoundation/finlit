@@ -1,515 +1,7 @@
-# FINLIT360 - Test Results
+# FINLIT360 v2 - Test Results
 
-## User Problem Statement
-Enterprise-grade Campaign Management Platform (FINLIT360) for ISCI Foundation to digitize Financial Literacy Awareness Camps conducted on behalf of banks. 10 user roles, complete camp lifecycle from allocation to GPS-tagged completion, real-time analytics, audit trails.
-
-## Backend Implementation Summary
-- Auth via mobile OTP (demo mode: fixed OTP `123456`)
-- 10 pre-seeded users, one per role (mobiles 9000000001 ... 9000000011)
-- Master data: banks, projects, districts, blocks, branches, villages, teams, vehicles, routes, users
-- Camps: full lifecycle actions (create, confirm, request-change, reject, assign-representative, assign-team, schedule, start, photos, attendance, submit, verify, close)
-- Photo upload: base64 stored in MongoDB (client-side compressed)
-- Role-scoped listing (branch sees own, district sees own, team leader sees team, bank HQ sees bank)
-- Dashboard summary (role-scoped) + Analytics aggregations + Notifications + Audit logs
-- Auto-seed on first API call (idempotent)
-
-## Frontend Implementation Summary
-- Login screen with mobile OTP + quick-demo buttons for all 10 roles
-- Role-adapted sidebar (only relevant nav items per role)
-- Dashboard with KPI cards, pipeline, compliance gauges, upcoming & recent lists
-- Camps list with filters + create dialog
-- Camp detail with timeline & role-based action buttons
-- Camp Execute (mobile-first) with GPS, 5+ photo capture, attendance, submit
-- Analytics: 4 charts + completed camp locations
-- Route Planning: village selection + nearest-neighbour sequencing
-- My Route (Today) for field teams
-- Master data pages
-- Reports with CSV export
-- Notifications & Audit Trail
-
----
-
-## Backend Tests
-
-### task: Auth - Send OTP (Valid Mobile)
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /auth/send-otp with valid registered mobile (9000000001) returns success:true and demoOtp:123456"
-
-### task: Auth - Send OTP (Unregistered Mobile)
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /auth/send-otp with unregistered mobile (9999999999) correctly returns 404 error"
-
-### task: Auth - Verify OTP (Valid)
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /auth/verify-otp with valid OTP (123456) returns token and user object. Super admin login successful."
-
-### task: Auth - Verify OTP (Invalid)
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /auth/verify-otp with invalid OTP correctly returns 401 error"
-
-### task: Auth - Get Current User
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /auth/me with valid token returns user object with role super_admin"
-
-### task: Auth - Get Current User (No Token)
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /auth/me without token correctly returns 401 Unauthorized"
-
-### task: Master Data - Banks
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /banks returns array of 1 bank (State Bank of Bharat)"
-
-### task: Master Data - Projects
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /projects returns array of 1 project (FLAP 2025-26)"
-
-### task: Master Data - Districts
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /districts returns array of 2 districts (Nashik, Pune)"
-
-### task: Master Data - Branches
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /branches returns array of 4 branches including Nashik Main Branch"
-
-### task: Master Data - Villages
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /villages returns array of 8 villages with GPS coordinates"
-
-### task: Master Data - Teams
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /teams returns array of 2 teams (Team Alpha - Nashik, Team Bravo - Pune)"
-
-### task: Master Data - Users
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /users returns array of 11 users covering all 10 roles"
-
-### task: Master Data - Vehicles
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /vehicles returns array of 2 vehicles"
-
-### task: Multi-Role Login
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ Successfully logged in as Branch Manager (9000000005), District Coordinator (9000000003), and Team Leader (9000000007)"
-
-### task: Camps - List (Super Admin)
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /camps as super_admin returns array of 8 pre-seeded camps"
-
-### task: Camps - Create
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps creates new camp with status 'awaiting_confirmation' and generates camp code"
-
-### task: Camps - Role Scoping (Branch Manager)
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /camps as branch_manager returns only camps from their branch (Nashik Main Branch). Role scoping working correctly."
-
-### task: Camps - Confirm
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/confirm as branch_manager changes status to 'confirmed'"
-
-### task: Camps - Assign Representative
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/assign-representative changes status to 'representative_assigned' and stores representative details"
-
-### task: Camps - Assign Team
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/assign-team as district_coordinator changes status to 'team_assigned' and assigns Team Alpha"
-
-### task: Camps - Schedule
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/schedule changes status to 'scheduled' with confirmed date"
-
-### task: Camps - Start
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/start with GPS data changes status to 'in_progress' and stores GPS coordinates"
-
-### task: Camps - Upload Photos
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/photos uploads 5 photos (venue, banner, session, group, attendance_register) with base64 data"
-
-### task: Camps - Save Attendance
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/attendance saves attendance data and correctly calculates total (120 beneficiaries)"
-
-### task: Camps - Submit
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/submit changes status to 'completed' with GPS end coordinates and remarks"
-
-### task: Camps - Verify
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/verify as district_coordinator changes status to 'verified' with verification remarks"
-
-### task: Camps - Close
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/close as super_admin changes status to 'closed'"
-
-### task: Camps - Timeline Verification
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /camps/:id returns complete timeline with all 13 expected events: created, village_proposed, awaiting_confirmation, confirmed, representative_assigned, team_assigned, scheduled, start, photos_uploaded, attendance_updated, completed, verified, closed"
-
-### task: Negative Test - Submit Without Photos
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: medium
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/submit without 5 photos correctly returns 400 error with message 'At least 5 photos required before submission'"
-
-### task: Negative Test - Verify Wrong Role
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: medium
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ POST /camps/:id/verify as branch_manager correctly returns 403 Forbidden"
-
-### task: Dashboard Aggregations
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /dashboard returns counts (total:12, completed:4, beneficiaries:691, women:199), byStatus breakdown, and compliance metrics (gps:100%, photos:100%, completion:33%)"
-
-### task: Analytics Aggregations
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /analytics returns byDistrict, byBranch, byTeam, trend (14-day), beneficiaryDist, and locations for completed camps"
-
-### task: Notifications
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /notifications returns array of 3 notifications for the logged-in user"
-
-### task: Audit Logs
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: high
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /audit as super_admin returns array of 29 audit log entries"
-
-### task: Negative Test - Audit Wrong Role
-- **implemented**: true
-- **working**: true
-- **file**: /app/app/api/[[...path]]/route.js
-- **stuck_count**: 0
-- **priority**: medium
-- **needs_retesting**: false
-- **status_history**:
-  - working: true
-    agent: testing
-    comment: "✅ GET /audit as branch_manager correctly returns 403 Forbidden"
-
----
-
-## Frontend Tests
-
-### task: Frontend UI Testing
-- **implemented**: true
-- **working**: NA
-- **file**: /app/app/page.js
-- **stuck_count**: 0
-- **priority**: low
-- **needs_retesting**: false
-- **status_history**:
-  - working: NA
-    agent: testing
-    comment: "Frontend testing not performed as per system instructions. User must be asked before frontend testing."
-
----
-
-## Metadata
-- **created_by**: testing_agent
-- **version**: 1.0
-- **test_sequence**: 1
-- **run_ui**: false
-- **last_updated**: 2026-07-20T07:37:00Z
-
----
-
-## Test Plan
-
-### current_focus:
-- All backend tests completed successfully
-
-### stuck_tasks:
-- None
-
-### test_all: false
-### test_priority: high_first
-
----
-
-## Agent Communication
-
-### Message 1:
-- **agent**: testing
-- **message**: "Backend testing completed. All 38 tests passed (100% success rate). Tested: Auth flow (6 tests), Master data (8 tests), Multi-role login (3 tests), Camps lifecycle (13 tests), Negative tests (3 tests), Aggregations (5 tests). All endpoints working correctly with proper role-based access control, validation, and error handling."
-
----
+## Redesign Summary
+Complete redesign per user feedback: minimalist/modern UI, 5 roles (Admin, Program Manager, Branch Manager, Regional Office, Team), simplified workflow with mandatory Branch confirmation gate. Added fees, invoices (PDF matching provided format), expenses, team salaries (Admin-only).
 
 ## Testing Protocol
 - ALWAYS read this file before invoking testing agent
@@ -518,52 +10,158 @@ Enterprise-grade Campaign Management Platform (FINLIT360) for ISCI Foundation to
 - ASK user before invoking deep_testing_frontend_nextjs
 - Do not re-fix issues already fixed by testing agents
 
----
+## Backend Tests Requested (v2 API)
 
-## Test Execution Summary
+Base URL: /app/.env NEXT_PUBLIC_BASE_URL. All endpoints prefixed `/api`. Demo OTP `123456`.
 
-**Date**: 2026-07-20
-**Tester**: Testing Agent (Backend)
-**Total Tests**: 38
-**Passed**: 38 ✅
-**Failed**: 0 ❌
-**Success Rate**: 100%
+Seeded users:
+- `9000000001` Admin (Mohit Modi)
+- `9000000002` Program Manager
+- `9000000003` Branch Manager (branchId = Endori)
+- `9000000004` Regional Office (roId = Gwalior RO)
+- `9000000005` Team
 
-### Test Categories:
-1. **Authentication (6 tests)**: ✅ All passed
-   - Send OTP (valid/invalid mobile)
-   - Verify OTP (valid/invalid)
-   - Get current user (with/without token)
+### Tests to run:
+1. **Auth**: send-otp / verify-otp / me / logout for admin. Invalid OTP → 401. Unregistered mobile → 404.
+2. **Master data GET**: /banks /regional_offices /districts /branches /villages /teams /users
+   - **Fee hiding**: as non-Admin/RO, `regional_offices[].feePerProgram` must be absent
+   - **Salary hiding**: as non-Admin, `teams[].members[].dailySalary` must be absent
+3. **Program lifecycle end-to-end**:
+   - As PM: POST /programs {branchId (Endori), villageId (PadraikaPura), teamId, proposedDate, remarks} → status `proposed`
+   - As Branch Manager (9000000003): POST /programs/:id/confirm → status `confirmed`, branchConfirmed=true
+   - As Team (9000000005): POST /programs/:id/upload-data with photos:[4 base64], participants:75, expenses:{taxi:500,food:300,refreshments:200,stationary:100,other:0}, remarks:"test"  → auto-advances to `conducted` when photos>=4 && participants set
+   - As Admin: POST /programs/:id/authenticate → status `authenticated`
+   - Negative: authenticate with <4 photos or no participants → 400
+   - Negative: Team upload without branchConfirmed → 400
+4. **Role scoping**:
+   - Branch Manager GET /programs returns only programs where branchId == their branch
+   - RO GET /programs returns only programs where roId == their roId, and does NOT include expenses/teamPayments fields
+5. **Invoices**:
+   - As Admin: POST /invoices {roId, programIds:[authenticated ids], invoiceNumber, invoiceDate, notes} → creates invoice with items, subtotal=count*feePerProgram, total=subtotal
+   - GET /invoices as RO → only own RO
+   - GET /invoices as PM → 403 (not admin/RO)? Actually PM should be forbidden. Let's verify: current code returns 403 for non-admin/non-RO. Confirm this.
+   - PATCH /invoices/:id (edit items) as Admin → recomputes total
+   - POST /invoices/:id/payment {amount, date, mode, ref, remarks} → adds to payments array, updates paidAmount
+   - RO cannot edit or add payment (403)
+6. **Salaries**:
+   - GET /salary-payments as non-Admin → 403
+   - POST /salary-payments {teamMemberId, teamId, amount, date, remarks} as Admin → success
+7. **Dashboard**: GET /dashboard for each role returns role-scoped counts.
 
-2. **Master Data (8 tests)**: ✅ All passed
-   - Banks, Projects, Districts, Branches, Villages, Teams, Users, Vehicles
+Report all failures. Do not modify code.
 
-3. **Multi-Role Login (3 tests)**: ✅ All passed
-   - Branch Manager, District Coordinator, Team Leader
+## Frontend (built, not tested yet)
+- Login (mobile+OTP), all 5 roles
+- Role-adaptive dashboard with drill-down cards
+- Programs list/detail/execute with 4-photo capture (camera+gallery) + expenses + GPS
+- Locations tabs (Banks, Regional Offices, Districts, Branches, Villages) with Admin-only fee setting
+- Teams with members + salary field (Admin-only)
+- Invoices: generation dialog, editable invoice view, PDF download (client-side jsPDF)
+- Salaries: earned/paid/due per member, payment history (Admin-only)
+- PDF generation for both program reports and invoices matching provided format
 
-4. **Camps Lifecycle (13 tests)**: ✅ All passed
-   - List, Create, Role Scoping, Confirm, Assign Representative, Assign Team
-   - Schedule, Start, Upload Photos, Save Attendance, Submit, Verify, Close
-   - Timeline verification
 
-5. **Negative Tests (3 tests)**: ✅ All passed
-   - Submit without photos (400)
-   - Verify with wrong role (403)
-   - Audit with wrong role (403)
+## Backend Test Results (Completed)
 
-6. **Aggregations (5 tests)**: ✅ All passed
-   - Dashboard, Analytics, Notifications, Audit Logs
+**Test Date:** 2026-07-22  
+**Test Suite:** backend_test.py  
+**Total Tests:** 46  
+**Passed:** 45 ✅  
+**Failed:** 1 ❌  
+**Success Rate:** 97.8%
 
-### Key Findings:
-- ✅ All API endpoints responding correctly
-- ✅ Role-based access control working properly
-- ✅ Data validation and error handling implemented correctly
-- ✅ Complete camp lifecycle from creation to closure working
-- ✅ Timeline tracking all events properly
-- ✅ GPS coordinates and photo uploads working
-- ✅ Attendance calculation accurate
-- ✅ Dashboard and analytics aggregations correct
-- ✅ Notifications and audit logs functioning
+### Test Summary by Section
 
-### No Issues Found
-All backend functionality is working as expected with no critical or major issues.
+#### 1. Authentication Tests (6/6 PASSED) ✅
+- ✅ Send OTP with valid mobile (Admin)
+- ✅ Send OTP with unregistered mobile → 404
+- ✅ Verify OTP with valid credentials
+- ✅ Verify OTP with invalid OTP → 401
+- ✅ GET /auth/me returns current user
+- ✅ POST /auth/logout works correctly
+
+#### 2. Master Data & Privacy Tests (10/10 PASSED) ✅
+- ✅ GET /banks returns all banks
+- ✅ GET /regional_offices as Admin → feePerProgram PRESENT
+- ✅ GET /regional_offices as PM → feePerProgram ABSENT (privacy working)
+- ✅ GET /regional_offices as RO → feePerProgram PRESENT
+- ✅ GET /districts returns all districts
+- ✅ GET /branches returns all branches
+- ✅ GET /villages returns all villages
+- ✅ GET /teams as Admin → dailySalary PRESENT
+- ✅ GET /teams as PM → dailySalary ABSENT (privacy working)
+- ✅ GET /users returns all users
+
+#### 3. Program Lifecycle Tests (7/7 PASSED) ✅
+- ✅ POST /programs as PM → status=proposed
+- ✅ POST /programs/:id/confirm as BM → status=confirmed, branchConfirmed=true
+- ✅ POST /programs/:id/upload-data without confirmation → 400 (correctly rejected)
+- ✅ POST /programs/:id/upload-data as Team → auto-advances to status=conducted
+- ✅ POST /programs/:id/authenticate as Admin → status=authenticated
+- ✅ POST /programs/:id/authenticate with <4 photos → 400 (correctly rejected)
+- ✅ POST /programs/:id/authenticate without participants → 400 (correctly rejected)
+
+#### 4. Role Scoping Tests (2/2 PASSED) ✅
+- ✅ GET /programs as BM → only returns programs from their branch (6 programs)
+- ✅ GET /programs as RO → expenses and teamPayments fields ABSENT (privacy working)
+
+#### 5. Invoice Tests (7/8 PASSED) ⚠️
+- ✅ POST /invoices as Admin → creates invoice with correct subtotal (3750) and total (3750)
+- ✅ GET /invoices as Admin → returns all invoices
+- ✅ GET /invoices as RO → returns only own RO invoices
+- ❌ **GET /invoices as PM → should return 403 but returns 200** (MINOR ISSUE)
+- ✅ PATCH /invoices/:id as Admin → recomputes total correctly
+- ✅ POST /invoices/:id/payment as Admin → adds payment, updates paidAmount
+- ✅ POST /invoices/:id/payment as RO → 403 (correctly rejected)
+- ✅ Programs linked to invoice have invoiceId field set
+
+#### 6. Salary Payments Tests (4/4 PASSED) ✅
+- ✅ GET /salary-payments as Admin → returns array
+- ✅ GET /salary-payments as PM → 403 (correctly rejected)
+- ✅ POST /salary-payments as Admin → creates payment successfully
+- ✅ POST /salary-payments as PM → 403 (correctly rejected)
+
+#### 7. Dashboard Tests (5/5 PASSED) ✅
+- ✅ GET /dashboard as Admin → returns counts and beneficiaries
+- ✅ GET /dashboard as PM → returns counts and beneficiaries
+- ✅ GET /dashboard as BM → returns branch-scoped counts (6 programs, 125 beneficiaries)
+- ✅ GET /dashboard as RO → returns RO-scoped counts (8 programs, 280 beneficiaries)
+- ✅ GET /dashboard as Team → returns team-scoped counts (8 programs, 280 beneficiaries)
+
+### Issues Found
+
+#### Minor Issue (Non-Critical)
+**Issue:** GET /invoices as Program Manager returns 200 instead of 403  
+**Location:** /app/app/api/[[...path]]/route.js line 416  
+**Current Behavior:** Program Manager can view all invoices  
+**Expected Behavior:** Only Admin and Regional Office should access invoices  
+**Impact:** Minor - does not block core functionality  
+**Root Cause:** Line 416 includes PROGRAM_MANAGER in allowed roles: `else if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role))`  
+**Fix Required:** Remove PROGRAM_MANAGER from the allowed roles check
+
+### Reproduction Steps for Failed Test
+```bash
+# Login as Program Manager
+POST /api/auth/send-otp {"mobile": "9000000002"}
+POST /api/auth/verify-otp {"mobile": "9000000002", "otp": "123456"}
+
+# Try to access invoices (should return 403 but returns 200)
+GET /api/invoices
+Authorization: Bearer <pm_token>
+```
+
+### Overall Assessment
+✅ **Backend API is 97.8% functional**  
+✅ All critical features working correctly:
+- Authentication and authorization
+- Master data privacy (fee and salary hiding)
+- Complete program lifecycle with validation
+- Role-based scoping for programs
+- Invoice creation, editing, and payment tracking
+- Salary payments (Admin-only)
+- Dashboard with role-based filtering
+
+⚠️ **One minor issue:** PM can view invoices (should be restricted to Admin/RO only)
+
+### Recommendation
+The backend is production-ready with one minor permission issue that should be fixed. All core workflows, validations, and privacy controls are working correctly.

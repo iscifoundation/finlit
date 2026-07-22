@@ -413,7 +413,7 @@ async function handle(request, { params }) {
     if (route === '/invoices' && method === 'GET') {
       const q = {};
       if (user.role === ROLES.REGIONAL_OFFICE) q.roId = user.roId;
-      else if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      else if (user.role !== ROLES.ADMIN) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
       const list = await db.collection('invoices').find(q).sort({ date: -1 }).limit(500).toArray();
       return cors(NextResponse.json(cleanArr(list)));
     }

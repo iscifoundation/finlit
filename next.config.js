@@ -1,5 +1,11 @@
 const nextConfig = {
   output: 'standalone',
+  allowedDevOrigins: [
+    '*.preview.emergentagent.com',
+    '*.preview.emergentcf.cloud',
+    '*.cluster-12.preview.emergentcf.cloud',
+    'finlit360-camp.emergent.host',
+  ],
   images: {
     unoptimized: true,
     remotePatterns: [

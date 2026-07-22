@@ -165,3 +165,86 @@ Authorization: Bearer <pm_token>
 
 ### Recommendation
 The backend is production-ready with one minor permission issue that should be fixed. All core workflows, validations, and privacy controls are working correctly.
+
+---
+
+## Frontend Connectivity Test Results (Completed)
+
+**Test Date:** 2026-07-22  
+**Test Type:** Connectivity & Loading Verification  
+**Tester:** Testing Agent
+
+### Test Summary
+
+❌ **CRITICAL INFRASTRUCTURE ISSUE: External preview URLs are not accessible**
+
+### Detailed Findings
+
+#### 1. External URL Access Tests
+
+**Primary URL:** `https://finlit360-camp.preview.emergentagent.com`
+- ❌ **Status:** HTTP 502 Bad Gateway (Cloudflare error)
+- ❌ **Result:** Application NOT accessible externally
+- 📸 Screenshot: Shows Cloudflare "Bad gateway" error page
+
+**Alternate URL:** `https://finlit360-camp.cluster-12.preview.emergentcf.cloud/`
+- ❌ **Status:** HTTP 403 Forbidden
+- ❌ **Result:** Access blocked
+- 📸 Screenshot: Shows "403 Forbidden" error page
+
+#### 2. Internal Application Health Check
+
+**Local URL:** `http://localhost:3000`
+- ✅ **Status:** HTTP 200 OK
+- ✅ **Result:** Application running correctly internally
+- ✅ **Verification:** 
+  - HTML renders correctly with "FINLIT360 - Financial Literacy Campaign Management" title
+  - CORS headers properly configured (Access-Control-Allow-Origin: *)
+  - Next.js server responding normally
+  - All static assets loading
+
+#### 3. Service Status
+
+- ✅ Next.js service: RUNNING (pid 893, uptime 22+ minutes)
+- ✅ MongoDB service: RUNNING (pid 43, uptime 34+ minutes)
+- ✅ Supervisor logs: Show successful HTTP 200 responses for internal requests
+- ✅ API endpoints: Responding correctly (e.g., POST /api/auth/send-otp 200)
+
+#### 4. Configuration Review
+
+**next.config.js:**
+- ✅ `allowedDevOrigins` configured with preview domains
+- ✅ CORS headers properly set in async headers()
+- ✅ X-Frame-Options set to ALLOWALL
+- ✅ Content-Security-Policy allows frame-ancestors
+
+### Root Cause Analysis
+
+The issue is **NOT with the application code or Next.js configuration**. The application is running correctly on port 3000 internally and responding with HTTP 200.
+
+The issue is with **Kubernetes ingress routing or Cloudflare configuration**:
+1. The ingress controller is returning 502 Bad Gateway, indicating it cannot reach the backend service
+2. The alternate URL returns 403 Forbidden, suggesting Cloudflare access restrictions
+3. Internal localhost:3000 works perfectly, confirming the app itself is healthy
+
+### What Was NOT Tested
+
+Due to the connectivity issue, the following tests could not be completed:
+- ❌ Login screen UI verification (5 role buttons, subtitle, etc.)
+- ❌ Admin quick-demo login flow
+- ❌ Dashboard KPI cards and sidebar navigation
+- ❌ Programs page loading
+- ❌ Session persistence after reload
+- ❌ Multi-page navigation responsiveness
+
+### Recommendation
+
+**This is an infrastructure/DevOps issue, not an application issue.** The following actions are needed:
+
+1. **Immediate:** Check Kubernetes ingress configuration for the preview URLs
+2. **Immediate:** Verify Cloudflare DNS and proxy settings for both domains
+3. **Immediate:** Check if the Kubernetes service is properly exposing port 3000
+4. **Immediate:** Verify ingress rules are routing traffic to the correct service/pod
+5. **After fix:** Re-run connectivity tests to verify external access
+
+The application code is ready and working correctly. Once the infrastructure routing is fixed, the frontend should be fully accessible.

@@ -197,6 +197,29 @@ async function handle(request, { params }) {
       return cors(NextResponse.json({ token, user: clean(u) }));
     }
 
+    if (route === '/auth/firebase-verify' && method === 'POST') {
+      const { idToken } = await request.json();
+      let payload;
+      try {
+        const { verifyFirebaseIdToken } = await import('@/lib/firebase-admin');
+        payload = await verifyFirebaseIdToken(idToken);
+      } catch (e) {
+        return cors(NextResponse.json({ error: `Firebase verification failed: ${e.message}` }, { status: 401 }));
+      }
+      const phone = payload.phone_number || '';
+      // Extract last 10 digits as our internal mobile format
+      const mobile = phone.replace(/\D/g, '').slice(-10);
+      if (!/^\d{10}$/.test(mobile)) return cors(NextResponse.json({ error: 'Invalid phone number in token' }, { status: 400 }));
+      let u = await db.collection('users').findOne({ mobile });
+      if (!u) {
+        return cors(NextResponse.json({ error: `Mobile +91 ${mobile} is not registered. Please contact your administrator to be added to FINLIT360.` }, { status: 404 }));
+      }
+      const token = uuidv4();
+      await db.collection('sessions').insertOne({ token, userId: u.id, createdAt: new Date(), expiresAt: new Date(Date.now() + 30 * 86400 * 1000) });
+      await audit(db, { userId: u.id, action: 'login_firebase', entityType: 'session', entityId: token });
+      return cors(NextResponse.json({ token, user: clean(u) }));
+    }
+
     const user = await getUser(request, db);
     if (route === '/auth/me' && method === 'GET') {
       if (!user) return cors(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));

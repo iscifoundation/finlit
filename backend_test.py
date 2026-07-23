@@ -168,6 +168,125 @@ def test_auth_logout():
         return False
 
 # ============================================================================
+# FIREBASE AUTH TESTS
+# ============================================================================
+
+def test_firebase_verify_invalid_token():
+    """Test: POST /auth/firebase-verify with invalid token - should 401"""
+    print_test("1.7 Firebase Auth: Invalid Token (should 401)")
+    success, data, status = make_request("POST", "/auth/firebase-verify", 
+                                         data={"idToken": "invalid"})
+    
+    if not success and status == 401 and "error" in data:
+        error_msg = data.get("error", "").lower()
+        if "firebase" in error_msg or "verification" in error_msg:
+            print_result(True, "Correctly rejected invalid token with 401", data)
+            return True
+        else:
+            print_result(False, f"Error message should mention Firebase/verification: {data}", data)
+            return False
+    else:
+        print_result(False, f"Should return 401 for invalid token (got {status})", data)
+        return False
+
+def test_firebase_verify_empty_token():
+    """Test: POST /auth/firebase-verify with empty token - should 401"""
+    print_test("1.8 Firebase Auth: Empty Token (should 401)")
+    success, data, status = make_request("POST", "/auth/firebase-verify", 
+                                         data={"idToken": ""})
+    
+    if not success and status == 401 and "error" in data:
+        print_result(True, "Correctly rejected empty token with 401", data)
+        return True
+    else:
+        print_result(False, f"Should return 401 for empty token (got {status})", data)
+        return False
+
+def test_firebase_verify_missing_token():
+    """Test: POST /auth/firebase-verify with missing idToken field - should 401"""
+    print_test("1.9 Firebase Auth: Missing idToken Field (should 401)")
+    success, data, status = make_request("POST", "/auth/firebase-verify", 
+                                         data={})
+    
+    if not success and status == 401 and "error" in data:
+        print_result(True, "Correctly rejected missing idToken with 401", data)
+        return True
+    else:
+        print_result(False, f"Should return 401 for missing idToken (got {status})", data)
+        return False
+
+def test_firebase_verify_fake_jwt():
+    """Test: POST /auth/firebase-verify with JWT-shaped but fake token - should 401"""
+    print_test("1.10 Firebase Auth: Fake JWT Token (should 401)")
+    fake_jwt = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImludmFsaWRraWQifQ.eyJmb28iOiJiYXIifQ.notavalidsignature"
+    success, data, status = make_request("POST", "/auth/firebase-verify", 
+                                         data={"idToken": fake_jwt})
+    
+    if not success and status == 401 and "error" in data:
+        error_msg = data.get("error", "").lower()
+        if "firebase" in error_msg or "verification" in error_msg or "token" in error_msg:
+            print_result(True, "Correctly rejected fake JWT with 401", data)
+            return True
+        else:
+            print_result(False, f"Error message should mention Firebase/verification/token: {data}", data)
+            return False
+    else:
+        print_result(False, f"Should return 401 for fake JWT (got {status})", data)
+        return False
+
+# ============================================================================
+# DEMO OTP REGRESSION TESTS
+# ============================================================================
+
+def test_demo_otp_regression_send():
+    """Test: Demo OTP still works - send-otp for demo mobile"""
+    print_test("1.11 Demo OTP Regression: Send OTP for 9000000001")
+    success, data, status = make_request("POST", "/auth/send-otp", 
+                                         data={"mobile": "9000000001"})
+    
+    if success and data.get("success") and data.get("demoOtp") == "123456":
+        print_result(True, "Demo OTP sent successfully with demoOtp:123456", data)
+        return True
+    else:
+        print_result(False, f"Demo OTP send failed (status {status})", data)
+        return False
+
+def test_demo_otp_regression_verify_correct():
+    """Test: Demo OTP still works - verify with correct OTP"""
+    print_test("1.12 Demo OTP Regression: Verify with correct OTP 123456")
+    success, data, status = make_request("POST", "/auth/verify-otp", 
+                                         data={"mobile": "9000000001", "otp": "123456"})
+    
+    if success and data.get("token") and data.get("user"):
+        user = data.get("user", {})
+        if user.get("role") == "admin":
+            print_result(True, "Demo OTP verification successful, user role=admin", 
+                        {"user": user.get("name"), "role": user.get("role")})
+            return True
+        else:
+            print_result(False, f"User role should be admin, got {user.get('role')}", data)
+            return False
+    else:
+        print_result(False, f"Demo OTP verification failed (status {status})", data)
+        return False
+
+def test_demo_otp_regression_verify_wrong():
+    """Test: Demo OTP still works - verify with wrong OTP should fail"""
+    print_test("1.13 Demo OTP Regression: Verify with wrong OTP 000000 (should 401)")
+    # First send OTP again
+    make_request("POST", "/auth/send-otp", data={"mobile": "9000000001"})
+    
+    success, data, status = make_request("POST", "/auth/verify-otp", 
+                                         data={"mobile": "9000000001", "otp": "000000"})
+    
+    if not success and status == 401:
+        print_result(True, "Correctly rejected wrong OTP with 401", data)
+        return True
+    else:
+        print_result(False, f"Should return 401 for wrong OTP (got {status})", data)
+        return False
+
+# ============================================================================
 # LOGIN OTHER ROLES
 # ============================================================================
 
@@ -1160,6 +1279,23 @@ def run_all_tests():
     results.append(("1.4 Verify OTP - Invalid (401)", test_auth_verify_otp_invalid()))
     results.append(("1.5 Get Current User", test_auth_me()))
     results.append(("1.6 Logout", test_auth_logout()))
+    
+    # Firebase Auth tests
+    print("\n" + "="*80)
+    print("SECTION 1B: FIREBASE PHONE AUTH TESTS")
+    print("="*80)
+    results.append(("1.7 Firebase - Invalid Token (401)", test_firebase_verify_invalid_token()))
+    results.append(("1.8 Firebase - Empty Token (401)", test_firebase_verify_empty_token()))
+    results.append(("1.9 Firebase - Missing Token (401)", test_firebase_verify_missing_token()))
+    results.append(("1.10 Firebase - Fake JWT (401)", test_firebase_verify_fake_jwt()))
+    
+    # Demo OTP Regression tests
+    print("\n" + "="*80)
+    print("SECTION 1C: DEMO OTP REGRESSION TESTS")
+    print("="*80)
+    results.append(("1.11 Demo OTP - Send", test_demo_otp_regression_send()))
+    results.append(("1.12 Demo OTP - Verify Correct", test_demo_otp_regression_verify_correct()))
+    results.append(("1.13 Demo OTP - Verify Wrong (401)", test_demo_otp_regression_verify_wrong()))
     
     # Login other roles
     print("\n" + "="*80)

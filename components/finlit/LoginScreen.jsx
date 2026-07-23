@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { api, setToken, ROLE_LABELS } from '@/lib/finlit/api';
+import { getFirebaseAuth, isFirebaseConfigured } from '@/lib/firebase-client';
+import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { ShieldCheck, ArrowRight } from 'lucide-react';
 
 const DEMO = [
@@ -15,34 +17,94 @@ const DEMO = [
   { mobile: '9000000004', role: 'regional_office', name: 'Regional Manager' },
   { mobile: '9000000005', role: 'team', name: 'Amit Pawar' },
 ];
+const DEMO_MOBILES = new Set(DEMO.map(d => d.mobile));
 
 export default function LoginScreen({ onLogin }) {
   const [step, setStep] = useState('mobile');
   const [mobile, setMobile] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
+  const [flow, setFlow] = useState('firebase'); // 'firebase' | 'demo'
+  const confirmationRef = useRef(null);
+  const recaptchaRef = useRef(null);
 
-  const sendOtp = async (m) => {
-    const t = m || mobile;
-    if (!/^\d{10}$/.test(t)) return toast.error('Enter a 10-digit mobile number');
+  const useFirebase = isFirebaseConfigured();
+
+  useEffect(() => {
+    return () => {
+      // Cleanup reCAPTCHA on unmount
+      if (recaptchaRef.current) {
+        try { recaptchaRef.current.clear(); } catch { /* ignore */ }
+      }
+    };
+  }, []);
+
+  const sendFirebaseOtp = async (m) => {
+    const target = m || mobile;
     setLoading(true);
     try {
-      const r = await api('/auth/send-otp', { method: 'POST', body: JSON.stringify({ mobile: t }) });
-      toast.success(`OTP sent. Demo: ${r.demoOtp}`);
-      setMobile(t); setOtp(r.demoOtp || ''); setStep('otp');
+      const auth = getFirebaseAuth();
+      if (!auth) throw new Error('Firebase not configured');
+      // Reset any existing recaptcha
+      if (recaptchaRef.current) {
+        try { recaptchaRef.current.clear(); } catch { /* ignore */ }
+        recaptchaRef.current = null;
+      }
+      const container = document.getElementById('recaptcha-container');
+      if (container) container.innerHTML = '';
+      recaptchaRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        size: 'invisible',
+        callback: () => {},
+      });
+      const confirmation = await signInWithPhoneNumber(auth, `+91${target}`, recaptchaRef.current);
+      confirmationRef.current = confirmation;
+      toast.success(`OTP sent to +91 ${target}`);
+      setMobile(target); setOtp(''); setStep('otp'); setFlow('firebase');
+    } catch (e) {
+      toast.error(e.message || 'Failed to send OTP. Ensure this domain is whitelisted in Firebase.');
+    }
+    setLoading(false);
+  };
+
+  const sendDemoOtp = async (m) => {
+    const target = m || mobile;
+    setLoading(true);
+    try {
+      const r = await api('/auth/send-otp', { method: 'POST', body: JSON.stringify({ mobile: target }) });
+      toast.success(`Demo OTP: ${r.demoOtp}`);
+      setMobile(target); setOtp(r.demoOtp || ''); setStep('otp'); setFlow('demo');
     } catch (e) { toast.error(e.message); }
     setLoading(false);
+  };
+
+  const startSend = async (m) => {
+    const target = m || mobile;
+    if (!/^\d{10}$/.test(target)) return toast.error('Enter a 10-digit mobile number');
+    // Demo mobiles always use demo OTP path (fast, no real SMS)
+    if (DEMO_MOBILES.has(target) || !useFirebase) return sendDemoOtp(target);
+    return sendFirebaseOtp(target);
   };
 
   const verify = async () => {
     if (!/^\d{6}$/.test(otp)) return toast.error('Enter 6-digit OTP');
     setLoading(true);
     try {
-      const r = await api('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ mobile, otp }) });
-      setToken(r.token);
-      toast.success(`Welcome, ${r.user.name}`);
-      onLogin(r.user);
-    } catch (e) { toast.error(e.message); }
+      if (flow === 'firebase' && confirmationRef.current) {
+        const result = await confirmationRef.current.confirm(otp);
+        const idToken = await result.user.getIdToken();
+        const r = await api('/auth/firebase-verify', { method: 'POST', body: JSON.stringify({ idToken }) });
+        setToken(r.token);
+        toast.success(`Welcome, ${r.user.name}`);
+        onLogin(r.user);
+      } else {
+        const r = await api('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ mobile, otp }) });
+        setToken(r.token);
+        toast.success(`Welcome, ${r.user.name}`);
+        onLogin(r.user);
+      }
+    } catch (e) {
+      toast.error(e.message.replace('auth/', '').replace(/-/g, ' '));
+    }
     setLoading(false);
   };
 
@@ -70,11 +132,14 @@ export default function LoginScreen({ onLogin }) {
                       value={mobile}
                       onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
                       placeholder="10-digit mobile"
-                      onKeyDown={e => e.key === 'Enter' && sendOtp()}
+                      onKeyDown={e => e.key === 'Enter' && startSend()}
                     />
                   </div>
+                  {useFirebase && !DEMO_MOBILES.has(mobile) && mobile.length === 10 && (
+                    <p className="text-[11px] text-emerald-700 mt-1">A real SMS OTP will be sent via Firebase</p>
+                  )}
                 </div>
-                <Button className="w-full h-11" onClick={() => sendOtp()} disabled={loading}>
+                <Button className="w-full h-11" onClick={() => startSend()} disabled={loading}>
                   {loading ? 'Sending...' : <>Continue<ArrowRight className="w-4 h-4 ml-1" /></>}
                 </Button>
               </div>
@@ -86,13 +151,16 @@ export default function LoginScreen({ onLogin }) {
                     className="mt-1.5 h-11 text-center tracking-widest text-lg"
                     value={otp}
                     onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="123456"
+                    placeholder="6-digit code"
+                    autoFocus
                     onKeyDown={e => e.key === 'Enter' && verify()}
                   />
-                  <p className="text-xs text-slate-500 mt-2">Sent to +91 {mobile}. Demo OTP: <b>123456</b></p>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Sent to +91 {mobile}. {flow === 'demo' ? <>Demo OTP: <b>123456</b></> : 'Check your SMS'}
+                  </p>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => setStep('mobile')} className="h-11">Back</Button>
+                  <Button variant="outline" onClick={() => { setStep('mobile'); setOtp(''); }} className="h-11">Back</Button>
                   <Button onClick={verify} disabled={loading} className="flex-1 h-11">{loading ? 'Verifying...' : 'Sign In'}</Button>
                 </div>
               </div>
@@ -101,10 +169,10 @@ export default function LoginScreen({ onLogin }) {
         </Card>
 
         <div className="mt-6">
-          <div className="text-xs text-slate-400 text-center mb-2">Quick demo access</div>
+          <div className="text-xs text-slate-400 text-center mb-2">Quick demo access (no real SMS)</div>
           <div className="space-y-1.5">
             {DEMO.map(u => (
-              <button key={u.mobile} onClick={() => sendOtp(u.mobile)} className="w-full flex items-center justify-between text-left px-3 py-2 rounded-lg bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition">
+              <button key={u.mobile} onClick={() => sendDemoOtp(u.mobile)} className="w-full flex items-center justify-between text-left px-3 py-2 rounded-lg bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition">
                 <div>
                   <div className="text-sm font-medium text-slate-800">{ROLE_LABELS[u.role]}</div>
                   <div className="text-xs text-slate-400">{u.name} • {u.mobile}</div>
@@ -114,6 +182,9 @@ export default function LoginScreen({ onLogin }) {
             ))}
           </div>
         </div>
+
+        {/* Firebase reCAPTCHA container (invisible) */}
+        <div id="recaptcha-container"></div>
       </div>
     </div>
   );

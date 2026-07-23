@@ -158,7 +158,7 @@ async function handle(request, { params }) {
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:3000`;
       const link = `${baseUrl}/api/auth/magic-callback?token=${token}`;
       try {
-        const { sendMagicLink } = await import('@/lib/resend');
+        const { sendMagicLink } = await import('@/lib/mailer');
         await sendMagicLink({ to: normalized, name: u.name, link });
       } catch (e) {
         console.error('Magic link email failed:', e.message);

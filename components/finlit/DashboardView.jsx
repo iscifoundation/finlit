@@ -5,7 +5,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { api, ROLES, STATUS, inr } from '@/lib/finlit/api';
-import { Tent, CheckCircle2, Clock, Users, MapPin, ArrowRight, FileText } from 'lucide-react';
+import { Tent, CheckCircle2, Clock, Users, MapPin, ArrowRight, FileText, Download } from 'lucide-react';
+import { downloadROReportPdf } from './pdf';
+import { toast } from 'sonner';
 
 const Stat = ({ label, value, sub, tone = 'default', onClick }) => {
   const tones = {
@@ -28,6 +30,7 @@ export default function DashboardView({ user, setView, onOpenProgram, onFilter }
   const [d, setD] = useState(null);
   const [progs, setProgs] = useState([]);
   const [ro, setRO] = useState(null);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     api('/dashboard').then(setD);
@@ -36,6 +39,23 @@ export default function DashboardView({ user, setView, onOpenProgram, onFilter }
       api(`/regional_offices/${user.roId}`).then(setRO).catch(() => {});
     }
   }, [user.roId, user.role]);
+
+  const downloadFullReport = async (withPhotos) => {
+    setDownloading(true);
+    try {
+      const [allProgs, districts, branches, villages, banks, ros] = await Promise.all([
+        api('/programs?status=authenticated'),
+        api('/districts'), api('/branches'), api('/villages'), api('/banks'), api('/regional_offices'),
+      ]);
+      const roMeta = ros.find(r => r.id === (user.roId || allProgs[0]?.roId));
+      const bank = banks.find(b => b.id === roMeta?.bankId);
+      const filtered = user.role === ROLES.REGIONAL_OFFICE ? allProgs.filter(p => p.roId === user.roId) : allProgs;
+      if (!filtered.length) { toast.error('No authenticated programs yet.'); setDownloading(false); return; }
+      downloadROReportPdf(filtered, { ro: roMeta, bank, districts, branches, villages }, { includePhotos: withPhotos });
+      toast.success('Report generated');
+    } catch (e) { toast.error(e.message); }
+    setDownloading(false);
+  };
 
   if (!d) return <div className="text-slate-400">Loading...</div>;
   const c = d.counts;
@@ -126,12 +146,39 @@ export default function DashboardView({ user, setView, onOpenProgram, onFilter }
 
       {user.role === ROLES.REGIONAL_OFFICE && ro?.feePerProgram && (
         <Card className="border-slate-200">
-          <CardContent className="p-5 flex items-center justify-between">
+          <CardContent className="p-5 flex items-center justify-between flex-wrap gap-3">
             <div>
               <div className="text-sm text-slate-500">Agreed fee per program</div>
               <div className="text-2xl font-semibold text-slate-900 mt-1">{inr(ro.feePerProgram)}</div>
             </div>
-            <Button variant="outline" onClick={() => setView('invoices')}><FileText className="w-4 h-4 mr-1" />View Invoices</Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button variant="outline" size="sm" onClick={() => downloadFullReport(false)} disabled={downloading}>
+                <Download className="w-4 h-4 mr-1" />Summary Report
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => downloadFullReport(true)} disabled={downloading}>
+                <Download className="w-4 h-4 mr-1" />Full Report (with photos)
+              </Button>
+              <Button size="sm" onClick={() => setView('invoices')}><FileText className="w-4 h-4 mr-1" />Invoices</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {[ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role) && c.authenticated > 0 && (
+        <Card className="border-slate-200">
+          <CardContent className="p-5 flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="text-sm text-slate-500">Consolidated Report</div>
+              <div className="text-slate-700 mt-1">Download all {c.authenticated} authenticated programs as a single PDF</div>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <Button variant="outline" size="sm" onClick={() => downloadFullReport(false)} disabled={downloading}>
+                <Download className="w-4 h-4 mr-1" />Summary PDF
+              </Button>
+              <Button size="sm" onClick={() => downloadFullReport(true)} disabled={downloading}>
+                <Download className="w-4 h-4 mr-1" />Full Report (with photos)
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

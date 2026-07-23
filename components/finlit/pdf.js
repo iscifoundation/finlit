@@ -196,7 +196,8 @@ export function downloadInvoicePdf(inv, refs) {
   doc.save(`${inv.invoiceNumber.replace(/\//g, '_')}.pdf`);
 }
 
-export function downloadROReportPdf(programs, refs) {
+export function downloadROReportPdf(programs, refs, options = {}) {
+  const { includePhotos = true } = options;
   const doc = new jsPDF();
   header(doc);
   doc.setFont('helvetica', 'bold');
@@ -205,21 +206,97 @@ export function downloadROReportPdf(programs, refs) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.text(`Regional Office: ${refs.ro?.name || ''}`, 20, 54);
-  doc.text(`Date: ${new Date().toLocaleDateString('en-IN')}`, 20, 60);
-  doc.text(`Total programs: ${programs.length}`, 20, 66);
+  if (refs.bank?.name) doc.text(`Bank: ${refs.bank.name}`, 20, 60);
+  doc.text(`Report Date: ${new Date().toLocaleDateString('en-IN')}`, 20, 66);
+  doc.text(`Total Programs: ${programs.length}`, 20, 72);
+  const totalBenef = programs.reduce((s, p) => s + (p.participants || 0), 0);
+  doc.text(`Total Beneficiaries: ${totalBenef.toLocaleString('en-IN')}`, 20, 78);
 
   autoTable(doc, {
-    startY: 72,
-    head: [['S.No.', 'Code', 'Date', 'Branch', 'Village', 'Participants']],
+    startY: 84,
+    head: [['S.No.', 'Code', 'Date', 'District', 'Branch', 'Village', 'Participants']],
     body: programs.map((p, i) => {
       const b = refs.branches?.find(x => x.id === p.branchId)?.name || '';
+      const d = refs.districts?.find(x => x.id === p.districtId)?.name || '';
       const v = refs.villages?.find(x => x.id === p.villageId)?.name || '';
-      return [i + 1, p.code, p.conductedAt ? new Date(p.conductedAt).toLocaleDateString('en-IN') : (p.proposedDate ? new Date(p.proposedDate).toLocaleDateString('en-IN') : ''), b, v, p.participants || 0];
+      return [
+        i + 1,
+        p.code,
+        p.conductedAt ? new Date(p.conductedAt).toLocaleDateString('en-IN') : (p.proposedDate ? new Date(p.proposedDate).toLocaleDateString('en-IN') : ''),
+        d, b, v, p.participants || 0,
+      ];
     }),
-    styles: { fontSize: 9 },
+    styles: { fontSize: 8.5, cellPadding: 2 },
     headStyles: { fillColor: [20, 40, 90], textColor: 255 },
   });
 
+  // Per-program detail pages
+  if (includePhotos) {
+    programs.forEach((p, idx) => {
+      const b = refs.branches?.find(x => x.id === p.branchId);
+      const d = refs.districts?.find(x => x.id === p.districtId);
+      const v = refs.villages?.find(x => x.id === p.villageId);
+      doc.addPage();
+      header(doc);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text(`Program ${idx + 1} of ${programs.length} — ${p.code}`, 105, 46, { align: 'center' });
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      let y = 56;
+      const line = (l, val) => { doc.setFont('helvetica', 'bold'); doc.text(l, 20, y); doc.setFont('helvetica', 'normal'); doc.text(String(val || '-'), 70, y); y += 6; };
+      line('Regional Office:', refs.ro?.name);
+      line('State:', d?.state);
+      line('District:', d?.name);
+      line('Branch:', b?.name);
+      line('Village:', v?.name);
+      const dateStr = p.conductedAt || p.proposedDate;
+      line('Date:', dateStr ? new Date(dateStr).toLocaleDateString('en-IN') : '-');
+      line('Participants:', p.participants || 0);
+      if (p.remarks) line('Remarks:', p.remarks);
+
+      const photos = (p.photos || []).filter(ph => ph.data).slice(0, 4);
+      if (photos.length) {
+        y += 4;
+        doc.setFont('helvetica', 'bold');
+        doc.text('Photo Evidence', 20, y); y += 4;
+        const w = 80, h = 55, gap = 10;
+        photos.forEach((ph, i) => {
+          const col = i % 2, row = Math.floor(i / 2);
+          try { doc.addImage(ph.data, 'JPEG', 20 + col * (w + gap), y + row * (h + 6), w, h); } catch (e) { /* skip broken image */ }
+        });
+        y += Math.ceil(photos.length / 2) * (h + 6) + 4;
+      } else {
+        y += 4;
+        doc.setFontSize(9); doc.setTextColor(150);
+        doc.text('No photo evidence available', 20, y);
+        doc.setTextColor(0);
+      }
+    });
+  }
+
+  // Final signature page
+  doc.addPage();
+  header(doc);
+  doc.setFontSize(10);
+  doc.text('This report is authenticated by ISCI Foundation.', 105, 60, { align: 'center' });
+  doc.text(`Total programs conducted and authenticated: ${programs.length}`, 105, 68, { align: 'center' });
+  doc.text(`Total beneficiaries reached: ${totalBenef.toLocaleString('en-IN')}`, 105, 76, { align: 'center' });
+
+  doc.setFontSize(9); doc.setTextColor(80);
+  doc.text('Authenticated for and on behalf of', 130, 210);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0);
+  doc.text(ISCI.name, 130, 218);
+  doc.setDrawColor(180); doc.rect(130, 222, 60, 12);
+  doc.setTextColor(150); doc.setFontSize(7);
+  doc.text('(Signature / Seal)', 160, 229, { align: 'center' });
+  doc.setTextColor(0); doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+  doc.text(ISCI.director, 130, 240);
+  doc.text('For ISCI Foundation, Director', 130, 245);
+
   footer(doc);
-  doc.save(`RO_Report_${(refs.ro?.name || '').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  const roName = (refs.ro?.name || 'RO').replace(/\s+/g, '_');
+  doc.save(`${roName}_ConsolidatedReport_${new Date().toISOString().slice(0, 10)}.pdf`);
 }

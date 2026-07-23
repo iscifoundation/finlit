@@ -195,6 +195,87 @@ Report every failure with exact reproduction. Do NOT modify code.
 
 ---
 
+## Firebase Phone Auth reCAPTCHA Fix - Frontend Testing
+
+**Test Date:** 2026-07-23  
+**Tester:** Testing Agent  
+**Test Type:** Fix Verification + Regression Testing  
+**Preview URL:** https://finlit360-camp.preview.emergentagent.com
+
+### Issue Identified and Fixed
+
+**Original Problem:**
+- Firebase Phone Auth reCAPTCHA widget was not rendering when users entered a non-demo mobile number
+- Users saw "auth/argument-error" toast message
+- Root cause: React state update (`setShowRecaptcha(true)`) is asynchronous, so the DOM element `#recaptcha-container` didn't exist when `RecaptchaVerifier` was being instantiated
+
+**Fix Applied:**
+- Added 100ms delay after `setShowRecaptcha(true)` to allow DOM to update before creating RecaptchaVerifier
+- File: `/app/components/finlit/LoginScreen.jsx`, function `sendFirebaseOtp`
+- Change: Added `await new Promise(resolve => setTimeout(resolve, 100));` after setting showRecaptcha state
+
+### Test Results Summary
+
+**✅ ALL TESTS PASSED (3/3)**
+
+#### Test 1: Visible reCAPTCHA for Real Phone Numbers ✅
+- **Mobile Number:** 9876543210 (non-demo)
+- **Green Hint:** "A real SMS OTP will be sent via Firebase" displayed correctly
+- **Blue Instruction Box:** Visible with text "🔒 Please complete the security check below to receive your OTP:"
+- **reCAPTCHA Widget:** Rendered successfully with "I'm not a robot" checkbox (iframe present)
+- **reCAPTCHA Container:** innerHTML length 952 bytes (> 100 bytes requirement)
+- **Button Text:** Changed to "Waiting for verification..." as expected
+- **Render Time:** < 1 second after clicking Continue
+- **No Errors:** No toast errors, no console errors
+
+#### Test 2: Demo Admin Login (Regression) ✅
+- **Demo Button:** Admin (ISCI Foundation) quick-demo button works
+- **OTP Auto-fill:** OTP field correctly auto-populated with "123456"
+- **Sign In:** Successfully reached Admin dashboard
+- **Dashboard:** Loaded with "Welcome, Mohit Modi" message and sidebar navigation
+- **No Breaking Changes:** Demo login flow unaffected by reCAPTCHA fix
+
+#### Test 3: Demo User Restrictions (Regression) ✅
+- **Users Page:** Loaded successfully with users table
+- **Warning Banner:** Yellow banner visible with text "Demo mode — you are logged in as a demo user. Adding, editing or removing users is disabled..."
+- **Add User Button:** Correctly hidden (not in DOM)
+- **Edit Buttons:** 0 visible (correctly hidden for demo users)
+- **Delete Buttons:** 0 visible (correctly hidden for demo users)
+- **No Breaking Changes:** Demo user restrictions working as designed
+
+### Technical Details
+
+**What Works:**
+1. ✅ Firebase SDK loading correctly
+2. ✅ Environment variables (NEXT_PUBLIC_FIREBASE_*) properly configured
+3. ✅ RecaptchaVerifier instantiation with `size: 'normal'` (visible widget)
+4. ✅ Blue instruction box rendering inline in login form
+5. ✅ Button state management (text changes to "Waiting for verification...")
+6. ✅ DOM timing issue resolved with async delay
+7. ✅ Demo login path unaffected
+8. ✅ Demo user restrictions unaffected
+
+**Screenshots Captured:**
+- `test1_recaptcha_visible.png` - Visible reCAPTCHA with blue instruction box
+- `test2_demo_otp.png` - Demo OTP screen with auto-filled OTP
+- `test2_dashboard.png` - Admin dashboard after demo login
+- `test3_users_demo_mode.png` - Users page showing demo mode restrictions
+
+### Conclusion
+
+**Status:** ✅ **FIX VERIFIED - ALL TESTS PASSING**
+
+The Firebase Phone Auth reCAPTCHA fix is working correctly:
+- Visible reCAPTCHA widget renders properly for non-demo mobile numbers
+- Clear UI guidance provided to users via blue instruction box
+- Button state indicates waiting for reCAPTCHA completion
+- No regression in demo login flow
+- No regression in demo user restrictions
+
+The fix successfully addresses the original issue where users were stuck because the reCAPTCHA widget wasn't rendering. Now users see a clear, visible reCAPTCHA challenge with instructions on what to do.
+
+---
+
 ## Firebase Phone Auth Diagnostic Test Results
 
 **Test Date:** 2026-01-23  

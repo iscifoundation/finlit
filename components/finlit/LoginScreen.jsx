@@ -25,6 +25,7 @@ export default function LoginScreen({ onLogin }) {
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [flow, setFlow] = useState('firebase'); // 'firebase' | 'demo'
+  const [showRecaptcha, setShowRecaptcha] = useState(false);
   const confirmationRef = useRef(null);
   const recaptchaRef = useRef(null);
 
@@ -52,16 +53,34 @@ export default function LoginScreen({ onLogin }) {
       }
       const container = document.getElementById('recaptcha-container');
       if (container) container.innerHTML = '';
+      
+      // Show recaptcha container and wait for DOM update
+      setShowRecaptcha(true);
+      
+      // Wait for next tick to ensure DOM is updated
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       recaptchaRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
-        size: 'invisible',
-        callback: () => {},
+        size: 'normal',
+        callback: () => { /* solved */ },
+        'expired-callback': () => { toast.error('Security check expired. Please try again.'); },
       });
+      await recaptchaRef.current.render();
       const confirmation = await signInWithPhoneNumber(auth, `+91${target}`, recaptchaRef.current);
       confirmationRef.current = confirmation;
       toast.success(`OTP sent to +91 ${target}`);
-      setMobile(target); setOtp(''); setStep('otp'); setFlow('firebase');
+      setMobile(target); setOtp(''); setStep('otp'); setFlow('firebase'); setShowRecaptcha(false);
     } catch (e) {
-      toast.error(e.message || 'Failed to send OTP. Ensure this domain is whitelisted in Firebase.');
+      const msg = String(e?.code || e?.message || e);
+      let friendly = msg;
+      if (msg.includes('unauthorized-domain')) friendly = 'This domain is not authorized in your Firebase project. Add it in Firebase Console → Authentication → Settings → Authorized domains.';
+      else if (msg.includes('invalid-phone-number')) friendly = 'Invalid phone number format.';
+      else if (msg.includes('quota-exceeded')) friendly = 'Daily SMS quota exceeded. Try again tomorrow or increase quota in Firebase Console.';
+      else if (msg.includes('too-many-requests')) friendly = 'Too many attempts. Please wait a few minutes and try again.';
+      else if (msg.includes('captcha-check-failed') || msg.includes('recaptcha')) friendly = 'Security check failed. Please try again.';
+      toast.error(friendly);
+      setShowRecaptcha(false);
+      if (recaptchaRef.current) { try { recaptchaRef.current.clear(); } catch { /* ignore */ } recaptchaRef.current = null; }
     }
     setLoading(false);
   };
@@ -139,8 +158,14 @@ export default function LoginScreen({ onLogin }) {
                     <p className="text-[11px] text-emerald-700 mt-1">A real SMS OTP will be sent via Firebase</p>
                   )}
                 </div>
+                {showRecaptcha && (
+                  <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
+                    <div className="text-xs text-blue-900 mb-2 font-medium">🔒 Please complete the security check below to receive your OTP:</div>
+                    <div id="recaptcha-container" className="flex justify-center"></div>
+                  </div>
+                )}
                 <Button className="w-full h-11" onClick={() => startSend()} disabled={loading}>
-                  {loading ? 'Sending...' : <>Continue<ArrowRight className="w-4 h-4 ml-1" /></>}
+                  {loading ? (showRecaptcha ? 'Waiting for verification...' : 'Sending...') : <>Continue<ArrowRight className="w-4 h-4 ml-1" /></>}
                 </Button>
               </div>
             ) : (
@@ -183,8 +208,8 @@ export default function LoginScreen({ onLogin }) {
           </div>
         </div>
 
-        {/* Firebase reCAPTCHA container (invisible) */}
-        <div id="recaptcha-container"></div>
+        {/* Firebase reCAPTCHA hidden fallback container (unused when visible one is rendered) */}
+        <div id="recaptcha-fallback" style={{ display: 'none' }}></div>
       </div>
     </div>
   );

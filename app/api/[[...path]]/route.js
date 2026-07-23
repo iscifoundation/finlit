@@ -96,11 +96,11 @@ async function seedIfEmpty(db) {
 
   const adminId = uuidv4(), pmId = uuidv4(), bmId = uuidv4(), roUserId = uuidv4(), teamUserId = uuidv4();
   await db.collection('users').insertMany([
-    { id: adminId, name: 'Mohit Modi', mobile: '9000000001', role: ROLES.ADMIN, email: 'admin@iscifoundation.org' },
-    { id: pmId, name: 'Priya Sharma', mobile: '9000000002', role: ROLES.PROGRAM_MANAGER, email: 'priya.pm@iscifoundation.org' },
-    { id: bmId, name: 'Vijay Joshi', mobile: '9000000003', role: ROLES.BRANCH_MANAGER, branchId: b1, email: 'vijay@mpgb.in' },
-    { id: roUserId, name: 'Regional Manager', mobile: '9000000004', role: ROLES.REGIONAL_OFFICE, roId, email: 'ro@mpgb.in' },
-    { id: teamUserId, name: 'Amit Pawar', mobile: '9000000005', role: ROLES.TEAM, email: 'amit@iscifoundation.org' },
+    { id: adminId, name: 'Mohit Modi', mobile: '9000000001', role: ROLES.ADMIN, email: 'admin@iscifoundation.org', isDemo: true },
+    { id: pmId, name: 'Priya Sharma', mobile: '9000000002', role: ROLES.PROGRAM_MANAGER, email: 'priya.pm@iscifoundation.org', isDemo: true },
+    { id: bmId, name: 'Vijay Joshi', mobile: '9000000003', role: ROLES.BRANCH_MANAGER, branchId: b1, email: 'vijay@mpgb.in', isDemo: true },
+    { id: roUserId, name: 'Regional Manager', mobile: '9000000004', role: ROLES.REGIONAL_OFFICE, roId, email: 'ro@mpgb.in', isDemo: true },
+    { id: teamUserId, name: 'Amit Pawar', mobile: '9000000005', role: ROLES.TEAM, email: 'amit@iscifoundation.org', isDemo: true },
   ]);
   // Set branch manager ref
   await db.collection('branches').updateOne({ id: b1 }, { $set: { managerId: bmId, managerName: 'Vijay Joshi' } });
@@ -232,6 +232,79 @@ async function handle(request, { params }) {
       return cors(NextResponse.json({ success: true }));
     }
     if (!user) return cors(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+
+    // USER MANAGEMENT (special rules: only NON-DEMO Admin/PM can manage)
+    if (route === '/users' && method === 'POST') {
+      if (user.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot add new users. Please sign in with your real account.' }, { status: 403 }));
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      const body = await request.json();
+      if (!/^\d{10}$/.test(String(body.mobile || ''))) return cors(NextResponse.json({ error: 'Enter a valid 10-digit mobile number' }, { status: 400 }));
+      if (!body.name?.trim()) return cors(NextResponse.json({ error: 'Name is required' }, { status: 400 }));
+      if (!Object.values(ROLES).includes(body.role)) return cors(NextResponse.json({ error: 'Invalid role' }, { status: 400 }));
+      // PM can only create branch_manager and team users
+      if (user.role === ROLES.PROGRAM_MANAGER && ![ROLES.BRANCH_MANAGER, ROLES.TEAM].includes(body.role)) {
+        return cors(NextResponse.json({ error: 'Program Manager can only add Branch Managers and Team members' }, { status: 403 }));
+      }
+      const existing = await db.collection('users').findOne({ mobile: body.mobile });
+      if (existing) return cors(NextResponse.json({ error: 'A user with this mobile already exists' }, { status: 409 }));
+      const doc = {
+        id: uuidv4(),
+        name: body.name.trim(), mobile: body.mobile, role: body.role,
+        email: body.email || null, isDemo: false, createdAt: new Date(), createdBy: user.id,
+      };
+      if (body.role === ROLES.BRANCH_MANAGER && body.branchId) doc.branchId = body.branchId;
+      if (body.role === ROLES.REGIONAL_OFFICE && body.roId) doc.roId = body.roId;
+      if (body.role === ROLES.TEAM && body.teamId) doc.teamId = body.teamId;
+      await db.collection('users').insertOne(doc);
+      await audit(db, { userId: user.id, action: 'create_user', entityType: 'users', entityId: doc.id, after: doc });
+      // If BM assigned to branch, also set branch.managerId + managerName
+      if (doc.role === ROLES.BRANCH_MANAGER && doc.branchId) {
+        await db.collection('branches').updateOne({ id: doc.branchId }, { $set: { managerId: doc.id, managerName: doc.name } });
+      }
+      return cors(NextResponse.json(clean(doc)));
+    }
+
+    const uMatch = route.match(/^\/users\/([^/]+)$/);
+    if (uMatch) {
+      const uid = uMatch[1];
+      const target = await db.collection('users').findOne({ id: uid });
+      if (!target) return cors(NextResponse.json({ error: 'User not found' }, { status: 404 }));
+
+      if (method === 'GET') return cors(NextResponse.json(clean(target)));
+
+      if (method === 'PATCH' || method === 'PUT') {
+        if (user.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot edit users' }, { status: 403 }));
+        if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+        if (target.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot be edited' }, { status: 403 }));
+        if (user.role === ROLES.PROGRAM_MANAGER && ![ROLES.BRANCH_MANAGER, ROLES.TEAM].includes(target.role)) {
+          return cors(NextResponse.json({ error: 'Program Manager can only edit Branch Managers and Team members' }, { status: 403 }));
+        }
+        const body = await request.json();
+        const update = {};
+        for (const k of ['name', 'email', 'branchId', 'roId', 'teamId']) if (k in body) update[k] = body[k];
+        // Admin only: allow role change (but not toward admin unless already admin)
+        if (user.role === ROLES.ADMIN && body.role && Object.values(ROLES).includes(body.role)) update.role = body.role;
+        update.updatedAt = new Date();
+        await db.collection('users').updateOne({ id: uid }, { $set: update });
+        const after = await db.collection('users').findOne({ id: uid });
+        await audit(db, { userId: user.id, action: 'update_user', entityType: 'users', entityId: uid, before: target, after });
+        return cors(NextResponse.json(clean(after)));
+      }
+
+      if (method === 'DELETE') {
+        if (user.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot delete users' }, { status: 403 }));
+        if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+        if (target.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot be deleted' }, { status: 403 }));
+        if (target.id === user.id) return cors(NextResponse.json({ error: 'You cannot delete yourself' }, { status: 400 }));
+        if (user.role === ROLES.PROGRAM_MANAGER && ![ROLES.BRANCH_MANAGER, ROLES.TEAM].includes(target.role)) {
+          return cors(NextResponse.json({ error: 'Program Manager can only delete Branch Managers and Team members' }, { status: 403 }));
+        }
+        await db.collection('users').deleteOne({ id: uid });
+        await db.collection('sessions').deleteMany({ userId: uid });
+        await audit(db, { userId: user.id, action: 'delete_user', entityType: 'users', entityId: uid, before: target });
+        return cors(NextResponse.json({ success: true }));
+      }
+    }
 
     // Generic CRUD for these collections
     const crud = ['banks', 'regional_offices', 'districts', 'branches', 'villages', 'teams', 'users'];

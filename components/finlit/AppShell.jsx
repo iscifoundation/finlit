@@ -14,6 +14,7 @@ const NAV = [
   { key: 'programs', label: 'Programs', icon: Tent, roles: 'all' },
   { key: 'entities', label: 'Locations', icon: Building2, roles: ['admin', 'program_manager'] },
   { key: 'teams', label: 'Teams', icon: Users, roles: ['admin', 'program_manager'] },
+  { key: 'users', label: 'Users', icon: Users, roles: ['admin', 'program_manager'] },
   { key: 'invoices', label: 'Invoices', icon: FileText, roles: ['admin', 'regional_office'] },
   { key: 'salaries', label: 'Salaries', icon: Wallet, roles: ['admin'] },
   { key: 'audit', label: 'Audit', icon: ScrollText, roles: ['admin'] },

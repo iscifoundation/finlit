@@ -10,6 +10,7 @@ import ProgramDetailView from '@/components/finlit/ProgramDetailView';
 import ProgramExecuteView from '@/components/finlit/ProgramExecuteView';
 import EntitiesView from '@/components/finlit/EntitiesView';
 import TeamsView from '@/components/finlit/TeamsView';
+import UsersView from '@/components/finlit/UsersView';
 import InvoicesView from '@/components/finlit/InvoicesView';
 import SalariesView from '@/components/finlit/SalariesView';
 import NotificationsView from '@/components/finlit/NotificationsView';
@@ -49,6 +50,7 @@ function App() {
       {view === 'program-execute' && execId && <ProgramExecuteView id={execId} user={user} onBack={() => { setExecId(null); setView('program-detail'); setProgramId(execId); }} />}
       {view === 'entities' && <EntitiesView user={user} />}
       {view === 'teams' && <TeamsView user={user} />}
+      {view === 'users' && <UsersView user={user} />}
       {(view === 'invoices' || view === 'invoice-detail') && <InvoicesView user={user} view={view} setView={setView} currentId={invoiceId} setCurrentId={setInvoiceId} />}
       {view === 'salaries' && <SalariesView />}
       {view === 'notifications' && <NotificationsView onOpenProgram={openProgram} />}

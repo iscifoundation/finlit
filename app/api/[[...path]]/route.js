@@ -19,6 +19,9 @@ const ROLES = {
 };
 
 const DEMO_OTP = '123456';
+const PRIMARY_ADMIN_EMAIL = '[email protected]';
+const PRIMARY_ADMIN_NAME = 'Mohit Modi';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const clean = d => { if (!d) return d; const { _id, ...r } = d; return r; };
 const cleanArr = a => a.map(clean);
@@ -55,104 +58,55 @@ async function getUser(request, db) {
   return db.collection('users').findOne({ id: s.userId });
 }
 
-// ---------- Seed ----------
+// ---------- Seed / Migration ----------
 let seeded = false;
 async function seedIfEmpty(db) {
   if (seeded) return;
-  if (await db.collection('users').countDocuments() > 0) { seeded = true; return; }
   const now = new Date();
 
-  const bankId = uuidv4();
-  const roId = uuidv4();
-  const dist1 = uuidv4();
-  const dist2 = uuidv4();
-  const b1 = uuidv4(), b2 = uuidv4(), b3 = uuidv4();
-
-  await db.collection('banks').insertOne({
-    id: bankId, name: 'Madhya Pradesh Gramin Bank', code: 'MPGB', createdAt: now,
-  });
-  await db.collection('regional_offices').insertOne({
-    id: roId, bankId, name: 'Gwalior Regional Office',
-    address: 'Regional Office, City Centre, Gwalior, Madhya Pradesh',
-    state: 'Madhya Pradesh', contactPerson: 'Regional Manager', contactNumber: '',
-    feePerProgram: 3750, programsAllocated: 42, createdAt: now,
-  });
-  await db.collection('districts').insertMany([
-    { id: dist1, roId, name: 'Gwalior', state: 'Madhya Pradesh', createdAt: now },
-    { id: dist2, roId, name: 'Morena', state: 'Madhya Pradesh', createdAt: now },
-  ]);
-  await db.collection('branches').insertMany([
-    { id: b1, districtId: dist1, name: 'Endori', code: 'END', address: 'Endori', createdAt: now },
-    { id: b2, districtId: dist1, name: 'Aantri Kailaras', code: 'AKS', address: 'Aantri', createdAt: now },
-    { id: b3, districtId: dist2, name: 'Morena Main', code: 'MRN', address: 'Morena', createdAt: now },
-  ]);
-  const v1 = uuidv4(), v2 = uuidv4(), v3 = uuidv4(), v4 = uuidv4();
-  await db.collection('villages').insertMany([
-    { id: v1, branchId: b1, name: 'PadraikaPura', lat: 26.2183, lng: 78.1828, expectedAudience: 80, createdAt: now },
-    { id: v2, branchId: b1, name: 'Bhitarwar', lat: 26.0210, lng: 78.1900, expectedAudience: 100, createdAt: now },
-    { id: v3, branchId: b2, name: 'Mamchaun', lat: 26.4520, lng: 78.2100, expectedAudience: 90, createdAt: now },
-    { id: v4, branchId: b3, name: 'Sabalgarh', lat: 26.2600, lng: 77.4200, expectedAudience: 120, createdAt: now },
-  ]);
-
-  const adminId = uuidv4(), pmId = uuidv4(), bmId = uuidv4(), roUserId = uuidv4(), teamUserId = uuidv4();
-  await db.collection('users').insertMany([
-    { id: adminId, name: 'Mohit Modi', mobile: '9000000001', role: ROLES.ADMIN, email: 'admin@iscifoundation.org', isDemo: true },
-    { id: pmId, name: 'Priya Sharma', mobile: '9000000002', role: ROLES.PROGRAM_MANAGER, email: 'priya.pm@iscifoundation.org', isDemo: true },
-    { id: bmId, name: 'Vijay Joshi', mobile: '9000000003', role: ROLES.BRANCH_MANAGER, branchId: b1, email: 'vijay@mpgb.in', isDemo: true },
-    { id: roUserId, name: 'Regional Manager', mobile: '9000000004', role: ROLES.REGIONAL_OFFICE, roId, email: 'ro@mpgb.in', isDemo: true },
-    { id: teamUserId, name: 'Amit Pawar', mobile: '9000000005', role: ROLES.TEAM, email: 'amit@iscifoundation.org', isDemo: true },
-  ]);
-  // Set branch manager ref
-  await db.collection('branches').updateOne({ id: b1 }, { $set: { managerId: bmId, managerName: 'Vijay Joshi' } });
-
-  const teamId = uuidv4();
-  await db.collection('teams').insertOne({
-    id: teamId, name: 'Team Alpha',
-    members: [
-      { id: uuidv4(), name: 'Amit Pawar', contact: '9000000005', dailySalary: 800, userId: teamUserId },
-      { id: uuidv4(), name: 'Kavita Jadhav', contact: '9000000006', dailySalary: 600 },
-    ],
-    createdAt: now,
-  });
-
-  // Sample programs at various statuses
-  const stages = ['proposed', 'confirmed', 'conducted', 'authenticated'];
-  const villages = [{ id: v1, branchId: b1 }, { id: v2, branchId: b1 }, { id: v3, branchId: b2 }, { id: v4, branchId: b3 }];
-  const programs = [];
-  for (let i = 0; i < villages.length; i++) {
-    const status = stages[i];
-    const v = villages[i];
-    const branch = await db.collection('branches').findOne({ id: v.branchId });
-    const district = await db.collection('districts').findOne({ id: branch.districtId });
-    const proposedDate = new Date(Date.now() + (i - 1) * 86400000);
-    programs.push({
-      id: uuidv4(),
-      code: `FLC-${1000 + i}`,
-      bankId, roId,
-      districtId: district.id, branchId: branch.id, villageId: v.id,
-      teamId,
-      proposedDate,
-      status, // proposed | confirmed | conducted | authenticated | change_requested | rejected
-      branchConfirmed: ['confirmed', 'conducted', 'authenticated'].includes(status),
-      branchConfirmedAt: ['confirmed', 'conducted', 'authenticated'].includes(status) ? now : null,
-      branchConfirmedBy: ['confirmed', 'conducted', 'authenticated'].includes(status) ? bmId : null,
-      participants: ['conducted', 'authenticated'].includes(status) ? 65 + i * 5 : null,
-      photos: ['conducted', 'authenticated'].includes(status)
-        ? [1, 2, 3, 4].map(n => ({ id: uuidv4(), data: null, gps: { lat: 26.2 + i * 0.01, lng: 78.18 + i * 0.01 }, uploadedAt: now, index: n }))
-        : [],
-      expenses: ['conducted', 'authenticated'].includes(status) ? { taxi: 500, food: 300, refreshments: 200, stationary: 100, other: 0 } : null,
-      teamPayments: [],
-      remarks: '',
-      authenticatedBy: status === 'authenticated' ? pmId : null,
-      authenticatedAt: status === 'authenticated' ? now : null,
-      invoiceId: null,
-      timeline: [
-        { id: uuidv4(), event: 'created', by: pmId, message: 'Program created', timestamp: now },
-      ],
-      createdBy: pmId, createdAt: now, updatedAt: now,
-    });
+  // ONE-TIME MIGRATION: wipe legacy demo/random seed data so the app starts clean for production.
+  const wipedFlag = await db.collection('settings').findOne({ key: 'demoDataWiped_v3' });
+  if (!wipedFlag) {
+    await db.collection('users').deleteMany({ isDemo: true });
+    // Purge sample tenant + operational data from earlier seeds
+    for (const c of ['banks', 'regional_offices', 'districts', 'branches', 'villages', 'teams',
+      'programs', 'invoices', 'expenses', 'attendance', 'messages', 'notifications',
+      'audit_logs', 'salary_payments', 'magic_links', 'otp_sessions', 'sessions']) {
+      await db.collection(c).deleteMany({});
+    }
+    await db.collection('settings').updateOne(
+      { key: 'demoDataWiped_v3' },
+      { $set: { key: 'demoDataWiped_v3', value: true, at: now } },
+      { upsert: true }
+    );
+    console.log('[FINLIT360] Cleared legacy demo/random seed data');
   }
-  await db.collection('programs').insertMany(programs);
+
+  // Ensure primary admin exists (idempotent)
+  const primary = await db.collection('users').findOne({ email: PRIMARY_ADMIN_EMAIL });
+  if (!primary) {
+    const existingAdmin = await db.collection('users').findOne({ role: ROLES.ADMIN });
+    if (existingAdmin) {
+      // Overwrite existing admin's email to the canonical primary admin email
+      await db.collection('users').updateOne(
+        { id: existingAdmin.id },
+        { $set: { email: PRIMARY_ADMIN_EMAIL, name: existingAdmin.name || PRIMARY_ADMIN_NAME, isDemo: false, updatedAt: now } }
+      );
+      console.log(`[FINLIT360] Migrated existing admin -> ${PRIMARY_ADMIN_EMAIL}`);
+    } else {
+      await db.collection('users').insertOne({
+        id: uuidv4(),
+        name: PRIMARY_ADMIN_NAME,
+        email: PRIMARY_ADMIN_EMAIL,
+        mobile: null,
+        role: ROLES.ADMIN,
+        isDemo: false,
+        createdAt: now,
+      });
+      console.log(`[FINLIT360] Bootstrapped primary admin ${PRIMARY_ADMIN_EMAIL}`);
+    }
+  }
+
   seeded = true;
 }
 
@@ -286,19 +240,30 @@ async function handle(request, { params }) {
       if (user.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot add new users. Please sign in with your real account.' }, { status: 403 }));
       if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
       const body = await request.json();
-      if (!/^\d{10}$/.test(String(body.mobile || ''))) return cors(NextResponse.json({ error: 'Enter a valid 10-digit mobile number' }, { status: 400 }));
       if (!body.name?.trim()) return cors(NextResponse.json({ error: 'Name is required' }, { status: 400 }));
       if (!Object.values(ROLES).includes(body.role)) return cors(NextResponse.json({ error: 'Invalid role' }, { status: 400 }));
+      // Email is now mandatory (magic-link is the primary auth)
+      const emailNorm = String(body.email || '').toLowerCase().trim();
+      if (!EMAIL_RE.test(emailNorm)) {
+        return cors(NextResponse.json({ error: 'A valid email is required. Users log in via a magic link sent to this address.' }, { status: 400 }));
+      }
+      const dupEmail = await db.collection('users').findOne({ email: emailNorm });
+      if (dupEmail) return cors(NextResponse.json({ error: 'A user with this email already exists' }, { status: 409 }));
+      // Mobile is now optional; if provided, must be 10 digits and unique
+      const mobileRaw = String(body.mobile || '').trim();
+      if (mobileRaw) {
+        if (!/^\d{10}$/.test(mobileRaw)) return cors(NextResponse.json({ error: 'Enter a valid 10-digit mobile number (or leave blank)' }, { status: 400 }));
+        const dupMob = await db.collection('users').findOne({ mobile: mobileRaw });
+        if (dupMob) return cors(NextResponse.json({ error: 'A user with this mobile already exists' }, { status: 409 }));
+      }
       // PM can only create branch_manager and team users
       if (user.role === ROLES.PROGRAM_MANAGER && ![ROLES.BRANCH_MANAGER, ROLES.TEAM].includes(body.role)) {
         return cors(NextResponse.json({ error: 'Program Manager can only add Branch Managers and Team members' }, { status: 403 }));
       }
-      const existing = await db.collection('users').findOne({ mobile: body.mobile });
-      if (existing) return cors(NextResponse.json({ error: 'A user with this mobile already exists' }, { status: 409 }));
       const doc = {
         id: uuidv4(),
-        name: body.name.trim(), mobile: body.mobile, role: body.role,
-        email: body.email || null, isDemo: false, createdAt: new Date(), createdBy: user.id,
+        name: body.name.trim(), mobile: mobileRaw || null, role: body.role,
+        email: emailNorm, isDemo: false, createdAt: new Date(), createdBy: user.id,
       };
       if (body.role === ROLES.BRANCH_MANAGER && body.branchId) doc.branchId = body.branchId;
       if (body.role === ROLES.REGIONAL_OFFICE && body.roId) doc.roId = body.roId;
@@ -329,7 +294,14 @@ async function handle(request, { params }) {
         }
         const body = await request.json();
         const update = {};
-        for (const k of ['name', 'email', 'branchId', 'roId', 'teamId']) if (k in body) update[k] = body[k];
+        for (const k of ['name', 'branchId', 'roId', 'teamId']) if (k in body) update[k] = body[k];
+        if ('email' in body) {
+          const em = String(body.email || '').toLowerCase().trim();
+          if (!EMAIL_RE.test(em)) return cors(NextResponse.json({ error: 'A valid email is required' }, { status: 400 }));
+          const dup = await db.collection('users').findOne({ email: em, id: { $ne: uid } });
+          if (dup) return cors(NextResponse.json({ error: 'Another user already uses this email' }, { status: 409 }));
+          update.email = em;
+        }
         // Admin only: allow role change (but not toward admin unless already admin)
         if (user.role === ROLES.ADMIN && body.role && Object.values(ROLES).includes(body.role)) update.role = body.role;
         update.updatedAt = new Date();
@@ -358,28 +330,35 @@ async function handle(request, { params }) {
     if (route === '/branches' && method === 'POST') {
       if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
       const body = await request.json();
-      const doc = { id: uuidv4(), name: body.name, code: body.code, address: body.address, districtId: body.districtId, createdAt: new Date() };
-      // If BM email provided, ensure user exists and link
-      if (body.branchManagerEmail?.trim()) {
-        const email = body.branchManagerEmail.toLowerCase().trim();
-        let bmUser = await db.collection('users').findOne({ email });
-        if (!bmUser) {
-          if (user.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot auto-create Branch Manager accounts. Sign in with your real account.' }, { status: 403 }));
-          bmUser = {
-            id: uuidv4(), name: body.branchManagerName || email.split('@')[0],
-            email, mobile: body.branchManagerMobile || null,
-            role: ROLES.BRANCH_MANAGER, branchId: doc.id, isDemo: false,
-            createdBy: user.id, createdAt: new Date(),
-          };
-          await db.collection('users').insertOne(bmUser);
-          await audit(db, { userId: user.id, action: 'auto_create_bm', entityType: 'users', entityId: bmUser.id, after: bmUser });
-        } else {
-          await db.collection('users').updateOne({ id: bmUser.id }, { $set: { branchId: doc.id, role: ROLES.BRANCH_MANAGER } });
-        }
-        doc.managerId = bmUser.id;
-        doc.managerName = bmUser.name;
-        doc.managerEmail = email;
+      const bmEmail = String(body.branchManagerEmail || '').toLowerCase().trim();
+      if (!EMAIL_RE.test(bmEmail)) {
+        return cors(NextResponse.json({ error: 'Branch Manager email is required (used to send the magic-link login).' }, { status: 400 }));
       }
+      if (!body.name?.trim()) return cors(NextResponse.json({ error: 'Branch name is required' }, { status: 400 }));
+      if (!body.districtId) return cors(NextResponse.json({ error: 'District is required' }, { status: 400 }));
+      const doc = { id: uuidv4(), name: body.name.trim(), code: body.code, address: body.address, districtId: body.districtId, createdAt: new Date() };
+      // Ensure BM user exists and is linked
+      let bmUser = await db.collection('users').findOne({ email: bmEmail });
+      if (!bmUser) {
+        if (user.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot auto-create Branch Manager accounts. Sign in with your real account.' }, { status: 403 }));
+        bmUser = {
+          id: uuidv4(),
+          name: (body.branchManagerName || bmEmail.split('@')[0]).trim(),
+          email: bmEmail,
+          mobile: body.branchManagerMobile || null,
+          role: ROLES.BRANCH_MANAGER,
+          branchId: doc.id,
+          isDemo: false,
+          createdBy: user.id, createdAt: new Date(),
+        };
+        await db.collection('users').insertOne(bmUser);
+        await audit(db, { userId: user.id, action: 'auto_create_bm', entityType: 'users', entityId: bmUser.id, after: bmUser });
+      } else {
+        await db.collection('users').updateOne({ id: bmUser.id }, { $set: { branchId: doc.id, role: ROLES.BRANCH_MANAGER } });
+      }
+      doc.managerId = bmUser.id;
+      doc.managerName = bmUser.name;
+      doc.managerEmail = bmEmail;
       await db.collection('branches').insertOne(doc);
       await audit(db, { userId: user.id, action: 'create', entityType: 'branches', entityId: doc.id, after: doc });
       return cors(NextResponse.json(clean(doc)));
@@ -735,8 +714,8 @@ async function handle(request, { params }) {
       return cors(NextResponse.json(out));
     }
     if (route === '/settings/demo-login' && method === 'POST') {
-      if (user.role !== ROLES.ADMIN || user.email !== '[email protected]') {
-        return cors(NextResponse.json({ error: 'Only [email protected] can change this setting' }, { status: 403 }));
+      if (user.role !== ROLES.ADMIN || user.email !== PRIMARY_ADMIN_EMAIL) {
+        return cors(NextResponse.json({ error: `Only ${PRIMARY_ADMIN_EMAIL} can change this setting` }, { status: 403 }));
       }
       const { enabled } = await request.json();
       await db.collection('settings').updateOne(

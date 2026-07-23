@@ -25,7 +25,7 @@ export default function LoginScreen({ onLogin }) {
   const [demoOtpInput, setDemoOtpInput] = useState('');
 
   useEffect(() => {
-    api('/settings').then(s => setDemoEnabled(s.demoLoginEnabled !== false)).catch(() => {});
+    api('/settings').then(s => setDemoEnabled(s.demoLoginEnabled === true)).catch(() => setDemoEnabled(false));
     // Handle error redirects from magic link
     const params = new URLSearchParams(window.location.search);
     const err = params.get('error');

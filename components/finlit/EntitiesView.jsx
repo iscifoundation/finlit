@@ -104,12 +104,22 @@ export default function EntitiesView({ user }) {
         </FormDialog>
       )}
       {dialog === 'branch' && (
-        <FormDialog title="New Branch" onClose={() => { setDialog(null); setForm({}); }} onSubmit={() => create('branches')}>
-          <SelectField label="District" val={form.districtId} set={v => setForm({ ...form, districtId: v })} options={data.districts.map(d => ({ value: d.id, label: d.name }))} />
-          <Field label="Name" val={form.name} set={v => setForm({ ...form, name: v })} />
+        <FormDialog title="New Branch" onClose={() => { setDialog(null); setForm({}); }} onSubmit={() => {
+          if (!form.name?.trim()) return toast.error('Branch name is required');
+          if (!form.districtId) return toast.error('Select a district');
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(form.branchManagerEmail || '').trim())) return toast.error('Branch Manager email is required for magic-link login');
+          create('branches');
+        }}>
+          <SelectField label="District *" val={form.districtId} set={v => setForm({ ...form, districtId: v })} options={data.districts.map(d => ({ value: d.id, label: d.name }))} />
+          <Field label="Name *" val={form.name} set={v => setForm({ ...form, name: v })} />
           <Field label="Code" val={form.code} set={v => setForm({ ...form, code: v })} />
           <Field label="Address" val={form.address} set={v => setForm({ ...form, address: v })} />
-          <Field label="Manager Name" val={form.managerName} set={v => setForm({ ...form, managerName: v })} />
+          <div className="pt-2 border-t mt-2">
+            <div className="text-xs font-medium text-slate-600 mb-2">Branch Manager (auto-created for magic-link login)</div>
+            <Field label="Manager Name" val={form.branchManagerName} set={v => setForm({ ...form, branchManagerName: v })} />
+            <Field label="Manager Email *" type="email" val={form.branchManagerEmail} set={v => setForm({ ...form, branchManagerEmail: v })} />
+            <Field label="Manager Mobile (optional)" val={form.branchManagerMobile} set={v => setForm({ ...form, branchManagerMobile: v })} />
+          </div>
         </FormDialog>
       )}
       {dialog === 'village' && (

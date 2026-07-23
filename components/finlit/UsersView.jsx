@@ -48,10 +48,13 @@ export default function UsersView({ user }) {
   const openEdit = (u) => { setForm({ name: u.name || '', mobile: u.mobile || '', role: u.role || '', email: u.email || '', branchId: u.branchId || '', roId: u.roId || '', teamId: u.teamId || '' }); setDialog(u.id); };
 
   const submit = async () => {
-    if (!/^\d{10}$/.test(form.mobile)) return toast.error('Enter a valid 10-digit mobile');
     if (!form.name.trim()) return toast.error('Name is required');
     if (!form.role) return toast.error('Select a role');
-    const payload = { name: form.name.trim(), mobile: form.mobile, role: form.role, email: form.email || null };
+    const emailNorm = (form.email || '').toLowerCase().trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) return toast.error('A valid email is required — users log in via magic link');
+    const mobileNorm = (form.mobile || '').replace(/\D/g, '');
+    if (mobileNorm && !/^\d{10}$/.test(mobileNorm)) return toast.error('Mobile must be 10 digits (or leave blank)');
+    const payload = { name: form.name.trim(), mobile: mobileNorm || null, role: form.role, email: emailNorm };
     if (form.role === ROLES.BRANCH_MANAGER && form.branchId) payload.branchId = form.branchId;
     if (form.role === ROLES.REGIONAL_OFFICE && form.roId) payload.roId = form.roId;
     if (form.role === ROLES.TEAM && form.teamId) payload.teamId = form.teamId;
@@ -121,7 +124,7 @@ export default function UsersView({ user }) {
                       <div className="font-medium">{u.name}</div>
                       {u.email && <div className="text-xs text-slate-500">{u.email}</div>}
                     </td>
-                    <td className="p-3 font-mono text-xs">+91 {u.mobile}</td>
+                    <td className="p-3 font-mono text-xs">{u.mobile ? `+91 ${u.mobile}` : <span className="text-slate-400">—</span>}</td>
                     <td className="p-3">
                       <Badge variant="outline" className={`${ROLE_BADGE[u.role] || ''} font-normal`}>{ROLE_LABELS[u.role]}</Badge>
                       {u.isDemo && <Badge variant="outline" className="ml-1 bg-slate-100 text-slate-600 border-slate-300 font-normal text-[10px]">Demo</Badge>}
@@ -152,11 +155,16 @@ export default function UsersView({ user }) {
           <DialogHeader><DialogTitle>{dialog === 'new' ? 'Add User' : 'Edit User'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label>Name</Label>
+              <Label>Name <span className="text-red-500">*</span></Label>
               <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Full name" />
             </div>
             <div>
-              <Label>Mobile</Label>
+              <Label>Email <span className="text-red-500">*</span></Label>
+              <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="[email protected]" />
+              <div className="text-[11px] text-slate-400 mt-1">Users sign in with a magic link sent to this email.</div>
+            </div>
+            <div>
+              <Label>Mobile <span className="text-slate-400 text-xs">(optional)</span></Label>
               <div className="flex">
                 <div className="px-3 flex items-center border border-r-0 rounded-l-md bg-slate-50 text-sm text-slate-500">+91</div>
                 <Input className="rounded-l-none" value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value.replace(/\D/g, '').slice(0, 10) })} placeholder="10-digit mobile" disabled={dialog !== 'new'} />
@@ -164,7 +172,7 @@ export default function UsersView({ user }) {
               {dialog !== 'new' && <div className="text-[11px] text-slate-400 mt-1">Mobile cannot be changed after creation</div>}
             </div>
             <div>
-              <Label>Role</Label>
+              <Label>Role <span className="text-red-500">*</span></Label>
               <Select value={form.role} onValueChange={v => setForm({ ...form, role: v, branchId: '', roId: '', teamId: '' })} disabled={dialog !== 'new' && !isAdmin}>
                 <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
                 <SelectContent>{allowedRoles.map(r => <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>)}</SelectContent>
@@ -197,10 +205,6 @@ export default function UsersView({ user }) {
                 </Select>
               </div>
             )}
-            <div>
-              <Label>Email (optional)</Label>
-              <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
@@ -213,7 +217,7 @@ export default function UsersView({ user }) {
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Remove user?</DialogTitle></DialogHeader>
           <div className="text-sm text-slate-600">
-            Remove <b>{confirmDel?.name}</b> (+91 {confirmDel?.mobile})? Their sessions will be terminated. This cannot be undone.
+            Remove <b>{confirmDel?.name}</b>{confirmDel?.mobile ? ` (+91 ${confirmDel.mobile})` : confirmDel?.email ? ` (${confirmDel.email})` : ''}? Their sessions will be terminated. This cannot be undone.
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmDel(null)}>Cancel</Button>

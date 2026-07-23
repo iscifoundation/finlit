@@ -19,7 +19,7 @@ const ROLES = {
 };
 
 const DEMO_OTP = '123456';
-const PRIMARY_ADMIN_EMAIL = '[email protected]';
+const PRIMARY_ADMIN_EMAIL = 'info@iscifoundation.org';
 const PRIMARY_ADMIN_NAME = 'Mohit Modi';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

@@ -172,19 +172,11 @@ export default function ProgramExecuteView({ id, user, onBack }) {
         </CardContent>
       </Card>
 
-      {/* Expenses */}
-      <Card className="border-slate-200">
-        <CardContent className="p-4">
-          <div className="font-medium flex items-center gap-2 mb-3"><Wallet className="w-4 h-4" />Expenses (₹)</div>
-          <div className="grid grid-cols-2 gap-3">
-            {[['taxi', 'Taxi / Fuel'], ['food', 'Food'], ['refreshments', 'Refreshments'], ['stationary', 'Stationery'], ['other', 'Other']].map(([k, l]) => (
-              <div key={k}>
-                <Label className="text-xs">{l}</Label>
-                <Input type="number" min="0" value={expenses[k] || 0} onChange={e => setExpenses({ ...expenses, [k]: +e.target.value || 0 })} />
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 text-sm text-slate-700">Total: <b>₹{totalExp.toLocaleString('en-IN')}</b></div>
+      {/* Expenses moved to dashboard - per day, not per program */}
+      <Card className="border-slate-200 border-dashed">
+        <CardContent className="p-4 text-sm text-slate-500 flex items-start gap-2">
+          <Wallet className="w-4 h-4 mt-0.5" />
+          <div><b>Expenses are logged separately.</b> Go to <b>Expenses</b> from the sidebar to log the day&apos;s expenses (taxi, food, refreshments, stationery) for your team as a whole.</div>
         </CardContent>
       </Card>
 

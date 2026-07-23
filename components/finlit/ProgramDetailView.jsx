@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { api, STATUS, ROLES, ROLE_LABELS, inr } from '@/lib/finlit/api';
-import { ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck, PlayCircle, MapPin, Calendar, Users, Camera, Download, Wallet, Building2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck, PlayCircle, MapPin, Calendar, Users, Camera, Download, Wallet, Building2, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadProgramPdf } from './pdf';
 
@@ -50,9 +50,18 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
 
   // Available actions based on role & status
   const actions = [];
-  if (user.role === ROLES.BRANCH_MANAGER && p.status === 'proposed' && p.branchId === user.branchId) {
-    actions.push({ k: 'confirm', label: 'Confirm Date', Icon: CheckCircle2 });
-    actions.push({ k: 'request-change', label: 'Request Change', Icon: RefreshCw, variant: 'outline' });
+  if (p.status === 'proposed' || p.status === 'change_requested') {
+    if (user.role === ROLES.BRANCH_MANAGER && p.branchId === user.branchId) {
+      actions.push({ k: 'confirm', label: 'Confirm Date', Icon: CheckCircle2 });
+      actions.push({ k: 'request-change', label: 'Request Change', Icon: RefreshCw, variant: 'outline' });
+    }
+    if (user.role === ROLES.ADMIN) actions.push({ k: 'confirm', label: 'Confirm as Admin', Icon: CheckCircle2 });
+    if (user.role === ROLES.REGIONAL_OFFICE && p.roId === user.roId) actions.push({ k: 'confirm', label: 'Confirm as RO', Icon: CheckCircle2 });
+    if (user.role === ROLES.PROGRAM_MANAGER) {
+      const minsSinceCreation = (Date.now() - new Date(p.createdAt).getTime()) / 60000;
+      if (minsSinceCreation >= 30) actions.push({ k: 'confirm-pm', label: 'Confirm on behalf of Branch', Icon: CheckCircle2, variant: 'outline' });
+      else actions.push({ k: 'wait-pm', label: `Wait ${Math.ceil(30 - minsSinceCreation)}m for BM`, Icon: Clock, variant: 'ghost', disabled: true });
+    }
   }
   if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role) && ['change_requested', 'proposed'].includes(p.status)) {
     actions.push({ k: 'reschedule', label: 'Reschedule', Icon: Calendar, variant: 'outline' });
@@ -78,8 +87,8 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
         <div className="ml-auto flex flex-wrap gap-2">
           {canPdf && <Button size="sm" variant="outline" onClick={() => downloadProgramPdf(p, { ro, district, branch, village, bank })}><Download className="w-4 h-4 mr-1" />Download PDF</Button>}
           {actions.map(a => (
-            <Button key={a.k} size="sm" variant={a.variant || 'default'} disabled={busy}
-              onClick={() => a.special ? onExecute(p.id) : (a.k === 'confirm' ? doAction(a.k) : setDialog(a.k))}>
+            <Button key={a.k} size="sm" variant={a.variant || 'default'} disabled={busy || a.disabled}
+              onClick={() => a.special ? onExecute(p.id) : (a.k === 'confirm-pm' ? setDialog('confirm-pm') : (a.k === 'confirm' ? doAction('confirm') : setDialog(a.k)))}>
               <a.Icon className="w-4 h-4 mr-1" />{a.label}
             </Button>
           ))}
@@ -162,12 +171,13 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
         <DialogContent>
           <DialogHeader><DialogTitle className="capitalize">{dialog?.replace('-', ' ')}</DialogTitle></DialogHeader>
           {dialog === 'request-change' && <div><Label>Reason</Label><Textarea value={fd.reason || ''} onChange={e => setFd({ reason: e.target.value })} placeholder="E.g. requested a different date..." /></div>}
+          {dialog === 'confirm-pm' && <div><Label>Reason for confirming on behalf of Branch Manager <span className="text-red-500">*</span></Label><Textarea value={fd.reason || ''} onChange={e => setFd({ reason: e.target.value })} placeholder="E.g. Branch Manager unreachable for 30+ minutes..." required /></div>}
           {dialog === 'reschedule' && <div><Label>New date</Label><Input type="date" value={fd.date || ''} onChange={e => setFd({ date: e.target.value })} /></div>}
           {dialog === 'authenticate' && <div className="text-sm text-slate-600">Confirm this program is verified? It will be visible to Regional Office and can be included in an invoice.</div>}
           {dialog === 'unauthenticate' && <div><Label>Reason</Label><Textarea value={fd.reason || ''} onChange={e => setFd({ reason: e.target.value })} /></div>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button onClick={() => doAction(dialog, fd)} disabled={busy}>Confirm</Button>
+            <Button onClick={() => doAction(dialog === 'confirm-pm' ? 'confirm' : dialog, fd)} disabled={busy}>Confirm</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

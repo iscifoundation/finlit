@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { api, setToken, ROLE_LABELS, ROLES } from '@/lib/finlit/api';
-import { LayoutDashboard, Tent, FileText, Landmark, Users, Bell, LogOut, Menu, Building2, Wallet, MapPin, ScrollText, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Tent, FileText, Landmark, Users, Bell, LogOut, Menu, Building2, Wallet, MapPin, ScrollText, ShieldCheck, MessageSquare, Settings } from 'lucide-react';
 
 const NAV = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: 'all' },
@@ -15,8 +15,12 @@ const NAV = [
   { key: 'entities', label: 'Locations', icon: Building2, roles: ['admin', 'program_manager'] },
   { key: 'teams', label: 'Teams', icon: Users, roles: ['admin', 'program_manager'] },
   { key: 'users', label: 'Users', icon: Users, roles: ['admin', 'program_manager'] },
+  { key: 'expenses', label: 'Expenses', icon: Wallet, roles: ['admin', 'program_manager', 'team'] },
+  { key: 'attendance', label: 'Attendance', icon: Users, roles: ['admin', 'program_manager', 'team'] },
   { key: 'invoices', label: 'Invoices', icon: FileText, roles: ['admin', 'regional_office'] },
-  { key: 'salaries', label: 'Salaries', icon: Wallet, roles: ['admin'] },
+  { key: 'reports', label: 'Reports', icon: FileText, roles: ['admin', 'program_manager', 'regional_office'] },
+  { key: 'messages', label: 'Messages', icon: MessageSquare, roles: ['admin', 'program_manager', 'regional_office'] },
+  { key: 'settings', label: 'Settings', icon: Settings, roles: ['admin'] },
   { key: 'audit', label: 'Audit', icon: ScrollText, roles: ['admin'] },
 ];
 

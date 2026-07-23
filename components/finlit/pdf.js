@@ -77,18 +77,21 @@ export function downloadProgramPdf(p, refs) {
   line('Status:', (p.status || '').replace('_', ' '));
   if (p.remarks) { line('Remarks:', p.remarks); }
 
-  // Photos
+  // Photos - A6 size (approx 105x148mm each, 2 photos per page)
   const photos = (p.photos || []).filter(ph => ph.data).slice(0, 4);
   if (photos.length) {
-    y += 4;
-    doc.setFont('helvetica', 'bold');
-    doc.text('Photo Evidence', 20, y); y += 4;
-    const w = 80, h = 55, gap = 10;
     photos.forEach((ph, i) => {
-      const col = i % 2, row = Math.floor(i / 2);
-      try { doc.addImage(ph.data, 'JPEG', 20 + col * (w + gap), y + row * (h + 6), w, h); } catch (e) { /* ignore */ }
+      if (i === 0) {
+        // Continue on current page if room, else new page
+        if (y > 130) { doc.addPage(); header(doc); y = 44; }
+        doc.setFont('helvetica', 'bold');
+        doc.text('Photo Evidence', 20, y); y += 4;
+      } else if (i % 2 === 0) {
+        doc.addPage(); header(doc); y = 44;
+      }
+      try { doc.addImage(ph.data, 'JPEG', 25, y + (i % 2) * 130, 160, 120); } catch (e) { /* ignore */ }
     });
-    y += Math.ceil(photos.length / 2) * (h + 6) + 4;
+    y += 260;
   }
 
   if (y > 240) doc.addPage();
@@ -259,15 +262,10 @@ export function downloadROReportPdf(programs, refs, options = {}) {
 
       const photos = (p.photos || []).filter(ph => ph.data).slice(0, 4);
       if (photos.length) {
-        y += 4;
-        doc.setFont('helvetica', 'bold');
-        doc.text('Photo Evidence', 20, y); y += 4;
-        const w = 80, h = 55, gap = 10;
         photos.forEach((ph, i) => {
-          const col = i % 2, row = Math.floor(i / 2);
-          try { doc.addImage(ph.data, 'JPEG', 20 + col * (w + gap), y + row * (h + 6), w, h); } catch (e) { /* skip broken image */ }
+          if (i % 2 === 0) { doc.addPage(); header(doc); y = 44; doc.setFont('helvetica','bold'); doc.text(`${p.code} - Photo Evidence (${i+1}-${Math.min(i+2, photos.length)} of ${photos.length})`, 20, y); y += 4; }
+          try { doc.addImage(ph.data, 'JPEG', 25, y + (i % 2) * 130, 160, 120); } catch (e) { /* skip */ }
         });
-        y += Math.ceil(photos.length / 2) * (h + 6) + 4;
       } else {
         y += 4;
         doc.setFontSize(9); doc.setTextColor(150);

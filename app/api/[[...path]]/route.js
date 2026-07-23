@@ -176,12 +176,60 @@ async function handle(request, { params }) {
       if (!/^\d{10}$/.test(mobile || '')) return cors(NextResponse.json({ error: 'Enter a valid 10-digit mobile number' }, { status: 400 }));
       const u = await db.collection('users').findOne({ mobile });
       if (!u) return cors(NextResponse.json({ error: 'Mobile number not registered' }, { status: 404 }));
+      // Check demo login setting for non-demo mobiles
+      const s = await db.collection('settings').findOne({ key: 'demoLoginEnabled' });
+      const demoEnabled = s ? !!s.value : true;
+      if (!demoEnabled && u.isDemo) return cors(NextResponse.json({ error: 'Demo login has been disabled by the administrator.' }, { status: 403 }));
       await db.collection('otp_sessions').updateOne(
         { mobile },
         { $set: { mobile, otp: DEMO_OTP, expiresAt: new Date(Date.now() + 10 * 60 * 1000) } },
         { upsert: true }
       );
       return cors(NextResponse.json({ success: true, demoOtp: DEMO_OTP, mobile }));
+    }
+
+    // ---- MAGIC LINK AUTH ----
+    if (route === '/auth/magic-link' && method === 'POST') {
+      const { email } = await request.json();
+      const normalized = String(email || '').toLowerCase().trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return cors(NextResponse.json({ error: 'Enter a valid email address' }, { status: 400 }));
+      const u = await db.collection('users').findOne({ email: normalized });
+      if (!u) return cors(NextResponse.json({ error: 'Email not registered. Contact your administrator.' }, { status: 404 }));
+      const token = uuidv4() + uuidv4().replace(/-/g, '');
+      await db.collection('magic_links').insertOne({
+        token, email: normalized, userId: u.id,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        used: false, createdAt: new Date(),
+      });
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:3000`;
+      const link = `${baseUrl}/api/auth/magic-callback?token=${token}`;
+      try {
+        const { sendMagicLink } = await import('@/lib/resend');
+        await sendMagicLink({ to: normalized, name: u.name, link });
+      } catch (e) {
+        console.error('Magic link email failed:', e.message);
+        return cors(NextResponse.json({ error: `Failed to send email: ${e.message}` }, { status: 500 }));
+      }
+      return cors(NextResponse.json({ success: true, message: 'Magic link sent to your email' }));
+    }
+
+    if (route === '/auth/magic-callback' && method === 'GET') {
+      const url = new URL(request.url);
+      const token = url.searchParams.get('token');
+      if (!token) return cors(NextResponse.json({ error: 'Missing token' }, { status: 400 }));
+      const link = await db.collection('magic_links').findOne({ token });
+      if (!link) return NextResponse.redirect(new URL('/?error=invalid_link', request.url));
+      if (link.used) return NextResponse.redirect(new URL('/?error=link_used', request.url));
+      if (new Date(link.expiresAt) < new Date()) return NextResponse.redirect(new URL('/?error=link_expired', request.url));
+      const u = await db.collection('users').findOne({ id: link.userId });
+      if (!u) return NextResponse.redirect(new URL('/?error=user_not_found', request.url));
+      const sessionToken = uuidv4();
+      await db.collection('sessions').insertOne({ token: sessionToken, userId: u.id, createdAt: new Date(), expiresAt: new Date(Date.now() + 30 * 86400 * 1000) });
+      await db.collection('magic_links').updateOne({ token }, { $set: { used: true, usedAt: new Date() } });
+      await audit(db, { userId: u.id, action: 'login_magic', entityType: 'session', entityId: sessionToken });
+      // Redirect to a small HTML page that saves the token to localStorage and redirects to dashboard
+      const html = `<!DOCTYPE html><html><head><title>Signing in...</title><style>body{font-family:Inter,sans-serif;background:#f8fafc;color:#1e293b;text-align:center;padding:80px 20px}</style></head><body><div style="font-size:18px;font-weight:600">Signing you in...</div><div style="font-size:13px;color:#64748b;margin-top:8px">Redirecting to your dashboard</div><script>try{localStorage.setItem('finlit_token','${sessionToken}');}catch(e){}setTimeout(function(){window.location.href='/';},400);</script></body></html>`;
+      return new NextResponse(html, { headers: { 'Content-Type': 'text/html' } });
     }
 
     if (route === '/auth/verify-otp' && method === 'POST') {
@@ -306,6 +354,37 @@ async function handle(request, { params }) {
       }
     }
 
+    // Special: Branch POST with auto-create Branch Manager user from email
+    if (route === '/branches' && method === 'POST') {
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      const body = await request.json();
+      const doc = { id: uuidv4(), name: body.name, code: body.code, address: body.address, districtId: body.districtId, createdAt: new Date() };
+      // If BM email provided, ensure user exists and link
+      if (body.branchManagerEmail?.trim()) {
+        const email = body.branchManagerEmail.toLowerCase().trim();
+        let bmUser = await db.collection('users').findOne({ email });
+        if (!bmUser) {
+          if (user.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot auto-create Branch Manager accounts. Sign in with your real account.' }, { status: 403 }));
+          bmUser = {
+            id: uuidv4(), name: body.branchManagerName || email.split('@')[0],
+            email, mobile: body.branchManagerMobile || null,
+            role: ROLES.BRANCH_MANAGER, branchId: doc.id, isDemo: false,
+            createdBy: user.id, createdAt: new Date(),
+          };
+          await db.collection('users').insertOne(bmUser);
+          await audit(db, { userId: user.id, action: 'auto_create_bm', entityType: 'users', entityId: bmUser.id, after: bmUser });
+        } else {
+          await db.collection('users').updateOne({ id: bmUser.id }, { $set: { branchId: doc.id, role: ROLES.BRANCH_MANAGER } });
+        }
+        doc.managerId = bmUser.id;
+        doc.managerName = bmUser.name;
+        doc.managerEmail = email;
+      }
+      await db.collection('branches').insertOne(doc);
+      await audit(db, { userId: user.id, action: 'create', entityType: 'branches', entityId: doc.id, after: doc });
+      return cors(NextResponse.json(clean(doc)));
+    }
+
     // Generic CRUD for these collections
     const crud = ['banks', 'regional_offices', 'districts', 'branches', 'villages', 'teams', 'users'];
     for (const c of crud) {
@@ -384,19 +463,23 @@ async function handle(request, { params }) {
     if (route === '/programs' && method === 'POST') {
       if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
       const body = await request.json();
+      if (!body.teamId) return cors(NextResponse.json({ error: 'Team is required. Please select a team before creating the program.' }, { status: 400 }));
       const branch = await db.collection('branches').findOne({ id: body.branchId });
       if (!branch) return cors(NextResponse.json({ error: 'Branch not found' }, { status: 400 }));
       const district = await db.collection('districts').findOne({ id: branch.districtId });
       const ro = await db.collection('regional_offices').findOne({ id: district.roId });
+      const team = await db.collection('teams').findOne({ id: body.teamId });
+      if (!team) return cors(NextResponse.json({ error: 'Selected team not found' }, { status: 400 }));
       const prog = {
         id: uuidv4(),
         code: `FLC-${Math.floor(Math.random() * 9000) + 1000}`,
         bankId: ro.bankId, roId: ro.id,
         districtId: district.id, branchId: branch.id,
-        villageId: body.villageId, teamId: body.teamId || null,
+        villageId: body.villageId, teamId: body.teamId,
         proposedDate: body.proposedDate ? new Date(body.proposedDate) : null,
         status: 'proposed', branchConfirmed: false,
-        branchConfirmedAt: null, branchConfirmedBy: null,
+        branchConfirmedAt: null, branchConfirmedBy: null, confirmedByRole: null,
+        pmConfirmationReason: null,
         participants: null, photos: [], expenses: null, teamPayments: [],
         remarks: body.remarks || '', authenticatedBy: null, authenticatedAt: null, invoiceId: null,
         timeline: [{ id: uuidv4(), event: 'created', by: user.id, message: `Program proposed by ${user.name}`, timestamp: new Date() }],
@@ -404,10 +487,11 @@ async function handle(request, { params }) {
       };
       await db.collection('programs').insertOne(prog);
       await audit(db, { userId: user.id, action: 'create_program', entityType: 'programs', entityId: prog.id, after: prog });
-      // Notify branch manager
       if (branch.managerId) {
         await notify(db, [branch.managerId], { type: 'confirm_needed', title: 'Confirmation required', message: `${prog.code} awaiting your confirmation`, programId: prog.id });
       }
+      const roUsers = await db.collection('users').find({ role: ROLES.REGIONAL_OFFICE, roId: ro.id }).toArray();
+      await notify(db, roUsers.map(u => u.id), { type: 'new_program', title: 'New program created', message: `${prog.code} awaiting branch confirmation`, programId: prog.id });
       return cors(NextResponse.json(clean(prog)));
     }
 
@@ -441,12 +525,26 @@ async function handle(request, { params }) {
         };
 
         if (action === 'confirm') {
-          if (user.role !== ROLES.BRANCH_MANAGER && user.role !== ROLES.ADMIN) return cors(NextResponse.json({ error: 'Only Branch Manager can confirm' }, { status: 403 }));
-          if (user.role === ROLES.BRANCH_MANAGER && prog.branchId !== user.branchId) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+          const isBM = user.role === ROLES.BRANCH_MANAGER;
+          const isRO = user.role === ROLES.REGIONAL_OFFICE;
+          const isAdmin = user.role === ROLES.ADMIN;
+          const isPM = user.role === ROLES.PROGRAM_MANAGER;
+          if (!isBM && !isAdmin && !isRO && !isPM) return cors(NextResponse.json({ error: 'Not allowed to confirm' }, { status: 403 }));
+          if (isBM && prog.branchId !== user.branchId) return cors(NextResponse.json({ error: 'You can only confirm programs of your own branch' }, { status: 403 }));
+          if (isRO && prog.roId !== user.roId) return cors(NextResponse.json({ error: 'You can only confirm programs of your own Regional Office' }, { status: 403 }));
+          if (isPM) {
+            const minsSinceCreation = (Date.now() - new Date(prog.createdAt).getTime()) / 60000;
+            if (minsSinceCreation < 30) return cors(NextResponse.json({ error: `Only Branch Manager can confirm within the first 30 minutes. Try again in ${Math.ceil(30 - minsSinceCreation)} minute(s).` }, { status: 403 }));
+            if (!body.reason?.trim()) return cors(NextResponse.json({ error: 'Please provide a reason for confirming on behalf of the branch' }, { status: 400 }));
+          }
+          const roleLabel = isBM ? 'Branch Manager' : isRO ? 'Regional Office' : isAdmin ? 'Admin' : 'Program Manager';
+          const reason = body.reason ? ` Reason: ${body.reason}` : '';
           await setAndLog({
             status: 'confirmed', branchConfirmed: true, branchConfirmedAt: new Date(), branchConfirmedBy: user.id,
-          }, 'confirmed', `Date confirmed by ${user.name}`);
-          await notify(db, [prog.createdBy], { type: 'confirmed', title: 'Program confirmed', message: `${prog.code} confirmed`, programId: id });
+            confirmedByRole: user.role,
+            pmConfirmationReason: isPM ? body.reason : (prog.pmConfirmationReason || null),
+          }, 'confirmed', `Date confirmed by ${user.name} (${roleLabel}).${reason}`);
+          await notify(db, [prog.createdBy], { type: 'confirmed', title: 'Program confirmed', message: `${prog.code} confirmed by ${roleLabel}`, programId: id });
         } else if (action === 'request-change') {
           if (user.role !== ROLES.BRANCH_MANAGER) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
           await setAndLog({ status: 'change_requested' }, 'change_requested', `Change requested: ${body.reason || ''}`);
@@ -629,7 +727,149 @@ async function handle(request, { params }) {
       return cors(NextResponse.json({ counts, beneficiaries }));
     }
 
-    // NOTIFICATIONS
+    // ---- SETTINGS (Admin only, only real admin [email protected] can toggle demo login) ----
+    if (route === '/settings' && method === 'GET') {
+      const all = await db.collection('settings').find({}).toArray();
+      const out = {};
+      for (const s of all) out[s.key] = s.value;
+      return cors(NextResponse.json(out));
+    }
+    if (route === '/settings/demo-login' && method === 'POST') {
+      if (user.role !== ROLES.ADMIN || user.email !== '[email protected]') {
+        return cors(NextResponse.json({ error: 'Only [email protected] can change this setting' }, { status: 403 }));
+      }
+      const { enabled } = await request.json();
+      await db.collection('settings').updateOne(
+        { key: 'demoLoginEnabled' },
+        { $set: { key: 'demoLoginEnabled', value: !!enabled, updatedAt: new Date(), updatedBy: user.id } },
+        { upsert: true }
+      );
+      await audit(db, { userId: user.id, action: 'toggle_demo_login', entityType: 'settings', entityId: 'demoLoginEnabled', after: { value: !!enabled } });
+      return cors(NextResponse.json({ success: true, value: !!enabled }));
+    }
+
+    // ---- MESSAGES (RO <-> Admin+PM threaded) ----
+    if (route === '/messages' && method === 'GET') {
+      const url = new URL(request.url);
+      let roId = url.searchParams.get('roId');
+      if (user.role === ROLES.REGIONAL_OFFICE) roId = user.roId;
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.REGIONAL_OFFICE].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      const q = roId ? { roId } : {};
+      const msgs = await db.collection('messages').find(q).sort({ createdAt: 1 }).limit(500).toArray();
+      return cors(NextResponse.json(cleanArr(msgs)));
+    }
+    if (route === '/messages' && method === 'POST') {
+      const { text, roId: reqRoId } = await request.json();
+      if (!text?.trim()) return cors(NextResponse.json({ error: 'Message text required' }, { status: 400 }));
+      let roId = reqRoId;
+      if (user.role === ROLES.REGIONAL_OFFICE) roId = user.roId;
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.REGIONAL_OFFICE].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      if (!roId) return cors(NextResponse.json({ error: 'roId required' }, { status: 400 }));
+      const doc = { id: uuidv4(), roId, from: user.id, fromRole: user.role, fromName: user.name, text: text.trim(), createdAt: new Date() };
+      await db.collection('messages').insertOne(doc);
+      // Notify the other party
+      const recipients = [];
+      if (user.role === ROLES.REGIONAL_OFFICE) {
+        const pmsAndAdmins = await db.collection('users').find({ role: { $in: [ROLES.ADMIN, ROLES.PROGRAM_MANAGER] }, isDemo: { $ne: true } }).toArray();
+        recipients.push(...pmsAndAdmins.map(x => x.id));
+      } else {
+        const roUsers = await db.collection('users').find({ role: ROLES.REGIONAL_OFFICE, roId }).toArray();
+        recipients.push(...roUsers.map(x => x.id));
+      }
+      await notify(db, recipients, { type: 'new_message', title: 'New message', message: text.trim().slice(0, 100) });
+      return cors(NextResponse.json(clean(doc)));
+    }
+
+    // ---- DAILY EXPENSES ----
+    if (route === '/expenses' && method === 'GET') {
+      const url = new URL(request.url);
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      const q = {};
+      if (from || to) {
+        q.date = {};
+        if (from) q.date.$gte = new Date(from);
+        if (to) q.date.$lte = new Date(to);
+      }
+      // Team members see only own team's expenses
+      if (user.role === ROLES.TEAM) {
+        const teams = await db.collection('teams').find({ 'members.userId': user.id }).toArray();
+        q.teamId = { $in: teams.map(t => t.id) };
+      }
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.TEAM].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      const list = await db.collection('expenses').find(q).sort({ date: -1 }).limit(500).toArray();
+      return cors(NextResponse.json(cleanArr(list)));
+    }
+    if (route === '/expenses' && method === 'POST') {
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.TEAM].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      const body = await request.json();
+      const doc = {
+        id: uuidv4(),
+        date: new Date(body.date || Date.now()),
+        teamId: body.teamId,
+        taxi: +body.taxi || 0, food: +body.food || 0, refreshments: +body.refreshments || 0,
+        stationary: +body.stationary || 0, other: +body.other || 0,
+        remarks: body.remarks || '',
+        programIds: body.programIds || [],
+        authenticatedBy: null, authenticatedAt: null,
+        createdBy: user.id, createdAt: new Date(),
+      };
+      doc.total = doc.taxi + doc.food + doc.refreshments + doc.stationary + doc.other;
+      await db.collection('expenses').insertOne(doc);
+      return cors(NextResponse.json(clean(doc)));
+    }
+    const expM = route.match(/^\/expenses\/([^/]+)(?:\/([^/]+))?$/);
+    if (expM) {
+      const id = expM[1]; const action = expM[2];
+      if (method === 'DELETE') {
+        if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+        await db.collection('expenses').deleteOne({ id });
+        return cors(NextResponse.json({ success: true }));
+      }
+      if (action === 'authenticate' && method === 'POST') {
+        if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+        await db.collection('expenses').updateOne({ id }, { $set: { authenticatedBy: user.id, authenticatedAt: new Date() } });
+        return cors(NextResponse.json({ success: true }));
+      }
+    }
+
+    // ---- ATTENDANCE ----
+    if (route === '/attendance' && method === 'GET') {
+      const url = new URL(request.url);
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      const teamId = url.searchParams.get('teamId');
+      const q = {};
+      if (teamId) q.teamId = teamId;
+      if (from || to) {
+        q.date = {};
+        if (from) q.date.$gte = new Date(from);
+        if (to) q.date.$lte = new Date(to);
+      }
+      const list = await db.collection('attendance').find(q).sort({ date: -1 }).limit(1000).toArray();
+      return cors(NextResponse.json(cleanArr(list)));
+    }
+    if (route === '/attendance' && method === 'POST') {
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.TEAM].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      const body = await request.json();
+      const doc = {
+        id: uuidv4(),
+        date: new Date(body.date || Date.now()),
+        teamId: body.teamId,
+        records: body.records || [], // [{ memberId, status: 'present'|'absent' }]
+        markedBy: user.id, createdAt: new Date(),
+      };
+      // Upsert: one attendance record per team+date
+      const dateStr = doc.date.toISOString().slice(0, 10);
+      await db.collection('attendance').updateOne(
+        { teamId: doc.teamId, dateStr },
+        { $set: { ...doc, dateStr } },
+        { upsert: true }
+      );
+      return cors(NextResponse.json(clean(doc)));
+    }
+
+
     if (route === '/notifications' && method === 'GET') {
       const list = await db.collection('notifications').find({ userId: user.id }).sort({ createdAt: -1 }).limit(100).toArray();
       return cors(NextResponse.json(cleanArr(list)));

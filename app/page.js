@@ -12,7 +12,11 @@ import EntitiesView from '@/components/finlit/EntitiesView';
 import TeamsView from '@/components/finlit/TeamsView';
 import UsersView from '@/components/finlit/UsersView';
 import InvoicesView from '@/components/finlit/InvoicesView';
-import SalariesView from '@/components/finlit/SalariesView';
+import ExpensesView from '@/components/finlit/ExpensesView';
+import AttendanceView from '@/components/finlit/AttendanceView';
+import MessagesView from '@/components/finlit/MessagesView';
+import ReportsView from '@/components/finlit/ReportsView';
+import SettingsView from '@/components/finlit/SettingsView';
 import NotificationsView from '@/components/finlit/NotificationsView';
 import AuditView from '@/components/finlit/AuditView';
 
@@ -36,11 +40,7 @@ function App() {
 
   const openProgram = (id) => { setProgramId(id); setView('program-detail'); };
   const executeProgram = (id) => { setExecId(id); setView('program-execute'); };
-
-  const changeView = (v) => {
-    setView(v);
-    setProgramId(null); setExecId(null); setInvoiceId(null); setInitialFilter('');
-  };
+  const changeView = (v) => { setView(v); setProgramId(null); setExecId(null); setInvoiceId(null); setInitialFilter(''); };
 
   return (
     <AppShell user={user} view={view} setView={changeView} onLogout={() => { setUser(null); setView('dashboard'); }}>
@@ -51,8 +51,12 @@ function App() {
       {view === 'entities' && <EntitiesView user={user} />}
       {view === 'teams' && <TeamsView user={user} />}
       {view === 'users' && <UsersView user={user} />}
+      {view === 'expenses' && <ExpensesView user={user} />}
+      {view === 'attendance' && <AttendanceView user={user} />}
+      {view === 'messages' && <MessagesView user={user} />}
+      {view === 'reports' && <ReportsView user={user} />}
+      {view === 'settings' && <SettingsView user={user} />}
       {(view === 'invoices' || view === 'invoice-detail') && <InvoicesView user={user} view={view} setView={setView} currentId={invoiceId} setCurrentId={setInvoiceId} />}
-      {view === 'salaries' && <SalariesView />}
       {view === 'notifications' && <NotificationsView onOpenProgram={openProgram} />}
       {view === 'audit' && <AuditView />}
     </AppShell>

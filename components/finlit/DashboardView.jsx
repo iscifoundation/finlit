@@ -86,16 +86,17 @@ export default function DashboardView({ user, setView, onOpenProgram, onFilter }
         </div>
       ) : user.role === ROLES.TEAM ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Stat label="Pending Confirmation" value={c.proposed + c.change_requested} tone="amber" onClick={() => { onFilter?.('proposed'); setView('programs'); }} />
           <Stat label="Confirmed & Ready" value={c.confirmed} tone="sky" onClick={() => { onFilter?.('confirmed'); setView('programs'); }} />
           <Stat label="Conducted" value={c.conducted} tone="indigo" onClick={() => { onFilter?.('conducted'); setView('programs'); }} />
           <Stat label="Authenticated" value={c.authenticated} tone="emerald" onClick={() => { onFilter?.('authenticated'); setView('programs'); }} />
-          <Stat label="Total Assigned" value={c.total} onClick={() => setView('programs')} />
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <Stat label="Total Programs" value={c.total} onClick={() => setView('programs')} />
-          <Stat label="Awaiting Confirmation" value={c.pendingConfirm} tone="amber" onClick={() => { onFilter?.('proposed'); setView('programs'); }} />
-          <Stat label="Pending Authentication" value={c.pendingAuth} tone="indigo" onClick={() => { onFilter?.('conducted'); setView('programs'); }} />
+          <Stat label="Pending Confirmation" value={c.proposed + c.change_requested} tone="amber" onClick={() => { onFilter?.('proposed'); setView('programs'); }} />
+          <Stat label="Confirmed" value={c.confirmed} tone="sky" onClick={() => { onFilter?.('confirmed'); setView('programs'); }} />
+          <Stat label="Pending Auth" value={c.pendingAuth} tone="indigo" onClick={() => { onFilter?.('conducted'); setView('programs'); }} />
           <Stat label="Authenticated" value={c.authenticated} sub={`${d.beneficiaries.toLocaleString('en-IN')} beneficiaries`} tone="emerald" onClick={() => { onFilter?.('authenticated'); setView('programs'); }} />
         </div>
       )}

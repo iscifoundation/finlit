@@ -39,6 +39,7 @@ export default function ProgramsView({ user, onOpenProgram, initialFilter }) {
 
   const create = async () => {
     if (!nf.branchId || !nf.villageId) return toast.error('Select branch & village');
+    if (!nf.teamId) return toast.error('Team is required');
     try {
       await api('/programs', { method: 'POST', body: JSON.stringify({ ...nf, proposedDate: nf.proposedDate }) });
       toast.success('Program created & sent to branch for confirmation');
@@ -110,9 +111,9 @@ export default function ProgramsView({ user, onOpenProgram, initialFilter }) {
               </Select>
             </div>
             <div>
-              <Label>Team (optional)</Label>
+              <Label>Team <span className="text-red-500">*</span></Label>
               <Select value={nf.teamId} onValueChange={v => setNf({ ...nf, teamId: v })}>
-                <SelectTrigger><SelectValue placeholder="Select team" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select team (required)" /></SelectTrigger>
                 <SelectContent>{refs.teams.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>

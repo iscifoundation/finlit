@@ -160,7 +160,7 @@ export default function UsersView({ user }) {
             </div>
             <div>
               <Label>Email <span className="text-red-500">*</span></Label>
-              <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="[email protected]" />
+              <Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="user@example.com" />
               <div className="text-[11px] text-slate-400 mt-1">Users sign in with a magic link sent to this email.</div>
             </div>
             <div>

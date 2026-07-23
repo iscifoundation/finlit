@@ -100,7 +100,7 @@ export default function LoginScreen({ onLogin }) {
                       className="pl-9 h-11"
                       value={email}
                       onChange={e => setEmail(e.target.value)}
-                      placeholder="[email protected]"
+                      placeholder="you@example.com"
                       autoComplete="email"
                       onKeyDown={e => e.key === 'Enter' && sendMagicLink()}
                     />

@@ -546,17 +546,62 @@ async function handle(request, { params }) {
         }
         if (method === 'PATCH' || method === 'PUT') {
           if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+          // Only Admin can edit Banks and Regional Offices (matches add permission)
+          if ((c === 'banks' || c === 'regional_offices') && user.role !== ROLES.ADMIN) {
+            return cors(NextResponse.json({ error: `Only Admin can edit ${c === 'banks' ? 'Banks' : 'Regional Offices'}` }, { status: 403 }));
+          }
           const body = await request.json();
+          // Sanitize immutable fields
+          delete body.id; delete body._id; delete body.createdAt;
           // Only admin can change fees
           if (c === 'regional_offices' && 'feePerProgram' in body && user.role !== ROLES.ADMIN) delete body.feePerProgram;
           const before = await db.collection(c).findOne({ id });
+          if (!before) return cors(NextResponse.json({ error: 'Not found' }, { status: 404 }));
           await db.collection(c).updateOne({ id }, { $set: { ...body, updatedAt: new Date() } });
           const after = await db.collection(c).findOne({ id });
+          // Cascade: if branch name/manager changes, keep managerName in sync
+          if (c === 'branches' && 'name' in body) {
+            // no user-facing rename cascade needed here
+          }
           await audit(db, { userId: user.id, action: 'update', entityType: c, entityId: id, before, after });
           return cors(NextResponse.json(clean(after)));
         }
-        if (method === 'DELETE' && user.role === ROLES.ADMIN) {
+        if (method === 'DELETE') {
+          // Mirror add permissions: PM may delete districts/branches/villages/teams; Admin may delete anything
+          const adminOnly = ['banks', 'regional_offices', 'users'];
+          if (adminOnly.includes(c) && user.role !== ROLES.ADMIN) {
+            return cors(NextResponse.json({ error: `Only Admin can delete ${c.replace('_', ' ')}` }, { status: 403 }));
+          }
+          if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) {
+            return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+          }
+          // Dependency guards — prevent deletion when child records exist
+          const guards = {
+            banks: async () => await db.collection('regional_offices').countDocuments({ bankId: id }),
+            regional_offices: async () => await db.collection('districts').countDocuments({ roId: id }),
+            districts: async () => await db.collection('branches').countDocuments({ districtId: id }),
+            branches: async () => (
+              (await db.collection('villages').countDocuments({ branchId: id })) +
+              (await db.collection('programs').countDocuments({ branchId: id }))
+            ),
+            villages: async () => await db.collection('programs').countDocuments({ villageId: id }),
+            teams: async () => await db.collection('programs').countDocuments({ teamId: id }),
+          };
+          if (guards[c]) {
+            const dep = await guards[c]();
+            if (dep > 0) {
+              const label = { banks: 'regional offices', regional_offices: 'districts', districts: 'branches', branches: 'villages/programs', villages: 'programs', teams: 'programs' }[c];
+              return cors(NextResponse.json({ error: `Cannot delete — ${dep} ${label} still reference this record. Remove or reassign them first.` }, { status: 409 }));
+            }
+          }
+          const before = await db.collection(c).findOne({ id });
+          if (!before) return cors(NextResponse.json({ error: 'Not found' }, { status: 404 }));
           await db.collection(c).deleteOne({ id });
+          // For branches, also unlink the assigned branch manager (don't delete the user)
+          if (c === 'branches' && before.managerId) {
+            await db.collection('users').updateOne({ id: before.managerId }, { $unset: { branchId: '' } });
+          }
+          await audit(db, { userId: user.id, action: 'delete', entityType: c, entityId: id, before });
           return cors(NextResponse.json({ success: true }));
         }
       }

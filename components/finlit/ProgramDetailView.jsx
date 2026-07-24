@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { api, STATUS, ROLES, ROLE_LABELS, inr } from '@/lib/finlit/api';
-import { ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck, PlayCircle, MapPin, Calendar, Users, Camera, Download, Wallet, Building2, Clock } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck, PlayCircle, MapPin, Calendar, Users, Camera, Download, Wallet, Building2, Clock, UsersRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadProgramPdf } from './pdf';
 
@@ -65,6 +65,10 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
   }
   if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role) && ['change_requested', 'proposed'].includes(p.status)) {
     actions.push({ k: 'reschedule', label: 'Reschedule', Icon: Calendar, variant: 'outline' });
+  }
+  // Change team — allowed for admin/PM before the program is conducted
+  if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role) && ['proposed', 'confirmed', 'change_requested'].includes(p.status)) {
+    actions.push({ k: 'assign-team', label: p.teamId ? 'Change Team' : 'Assign Team', Icon: UsersRound, variant: 'outline' });
   }
   if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.TEAM].includes(user.role) && p.status === 'confirmed') {
     actions.push({ k: 'execute', label: 'Conduct Program', Icon: PlayCircle, special: true });
@@ -173,11 +177,41 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
           {dialog === 'request-change' && <div><Label>Reason</Label><Textarea value={fd.reason || ''} onChange={e => setFd({ reason: e.target.value })} placeholder="E.g. requested a different date..." /></div>}
           {dialog === 'confirm-pm' && <div><Label>Reason for confirming on behalf of Branch Manager <span className="text-red-500">*</span></Label><Textarea value={fd.reason || ''} onChange={e => setFd({ reason: e.target.value })} placeholder="E.g. Branch Manager unreachable for 30+ minutes..." required /></div>}
           {dialog === 'reschedule' && <div><Label>New date</Label><Input type="date" value={fd.date || ''} onChange={e => setFd({ date: e.target.value })} /></div>}
+          {dialog === 'assign-team' && (
+            <div className="space-y-3">
+              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                Current team: <span className="font-medium text-slate-800">{team?.name || '— none —'}</span>
+                {team?.leaderName && <> • Leader: <span className="font-medium text-slate-800">{team.leaderName}</span></>}
+              </div>
+              <div>
+                <Label>New team <span className="text-red-500">*</span></Label>
+                <select className="w-full h-10 border rounded-md px-3 text-sm bg-white mt-1" value={fd.teamId || ''} onChange={e => setFd({ ...fd, teamId: e.target.value })}>
+                  <option value="">Select a team...</option>
+                  {(refs.teams || []).filter(t => t.id !== p.teamId).map(t => (
+                    <option key={t.id} value={t.id}>{t.name}{t.leaderName ? ` — Leader: ${t.leaderName}` : ''}</option>
+                  ))}
+                </select>
+                {(refs.teams || []).length <= (p.teamId ? 1 : 0) && <div className="text-[11px] text-amber-600 mt-1">No other teams available. Create a team first under Teams.</div>}
+              </div>
+              <div>
+                <Label>Reason (optional)</Label>
+                <Textarea value={fd.reason || ''} onChange={e => setFd({ ...fd, reason: e.target.value })} placeholder="E.g. team availability, geographic proximity, etc." />
+              </div>
+            </div>
+          )}
           {dialog === 'authenticate' && <div className="text-sm text-slate-600">Confirm this program is verified? It will be visible to Regional Office and can be included in an invoice.</div>}
           {dialog === 'unauthenticate' && <div><Label>Reason</Label><Textarea value={fd.reason || ''} onChange={e => setFd({ reason: e.target.value })} /></div>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
-            <Button onClick={() => doAction(dialog === 'confirm-pm' ? 'confirm' : dialog, fd)} disabled={busy}>Confirm</Button>
+            <Button
+              onClick={() => {
+                if (dialog === 'assign-team' && !fd.teamId) return toast.error('Select a team');
+                doAction(dialog === 'confirm-pm' ? 'confirm' : dialog, fd);
+              }}
+              disabled={busy}
+            >
+              {dialog === 'assign-team' ? 'Change Team' : 'Confirm'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

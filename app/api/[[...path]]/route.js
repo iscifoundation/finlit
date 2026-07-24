@@ -937,7 +937,23 @@ async function handle(request, { params }) {
           if (branch?.managerId) await notify(db, [branch.managerId], { type: 'confirm_needed', title: 'Re-confirmation needed', message: `${prog.code} needs confirmation`, programId: id });
         } else if (action === 'assign-team') {
           if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
-          await setAndLog({ teamId: body.teamId }, 'assign_team', `Team assigned`);
+          // Only allowed before the program is conducted
+          if (['conducted', 'authenticated'].includes(prog.status)) {
+            return cors(NextResponse.json({ error: `Cannot change team after the program is ${prog.status}. Team can only be changed before conduction.` }, { status: 409 }));
+          }
+          if (!body.teamId) return cors(NextResponse.json({ error: 'Select a team' }, { status: 400 }));
+          const newTeam = await db.collection('teams').findOne({ id: body.teamId });
+          if (!newTeam) return cors(NextResponse.json({ error: 'Team not found' }, { status: 404 }));
+          const oldTeamId = prog.teamId;
+          const oldTeamName = oldTeamId ? (await db.collection('teams').findOne({ id: oldTeamId }))?.name : null;
+          const changeNote = oldTeamId && oldTeamId !== body.teamId
+            ? `Team changed from ${oldTeamName || 'previous team'} to ${newTeam.name}${body.reason ? ` — ${body.reason}` : ''}`
+            : `Team assigned: ${newTeam.name}`;
+          await setAndLog({ teamId: body.teamId }, 'assign_team', changeNote);
+          // Notify the new team leader
+          if (newTeam.leaderId) {
+            await notify(db, [newTeam.leaderId], { type: 'team_assigned', title: 'Program assigned to your team', message: `${prog.code} — ${newTeam.name}`, programId: id });
+          }
         } else if (action === 'upload-data') {
           // Team uploads execution data (photos, participants, expenses)
           if (![ROLES.TEAM, ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));

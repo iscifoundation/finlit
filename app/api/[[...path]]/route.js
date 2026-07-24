@@ -507,6 +507,95 @@ async function handle(request, { params }) {
       return cors(NextResponse.json({ ...clean(doc), _bmTempPassword: bmTempPw, _bmEmailed: bmEmailed, _bmEmailError: bmEmailError }));
     }
 
+    // Special: Team POST with auto-create Team Leader user from email
+    if (route === '/teams' && method === 'POST') {
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      const body = await request.json();
+      if (!body.name?.trim()) return cors(NextResponse.json({ error: 'Team name is required' }, { status: 400 }));
+      const leaderEmail = String(body.leaderEmail || '').toLowerCase().trim();
+      const leaderName = String(body.leaderName || '').trim();
+      if (!leaderName) return cors(NextResponse.json({ error: 'Team Leader name is required' }, { status: 400 }));
+      if (!EMAIL_RE.test(leaderEmail)) return cors(NextResponse.json({ error: 'A valid Team Leader email is required (used to create their login).' }, { status: 400 }));
+
+      const teamId = uuidv4();
+      // Auto-create or link the leader user (role=TEAM)
+      let leader = await db.collection('users').findOne({ email: leaderEmail });
+      let leaderTempPw = null;
+      if (!leader) {
+        leaderTempPw = genPassword(10);
+        leader = {
+          id: uuidv4(),
+          username: leaderEmail,
+          name: leaderName,
+          email: leaderEmail,
+          mobile: (body.leaderMobile || '').trim() || null,
+          role: ROLES.TEAM,
+          teamId,
+          isTeamLeader: true,
+          passwordHash: hashPw(leaderTempPw),
+          mustChangePassword: true,
+          isDemo: false,
+          createdBy: user.id, createdAt: new Date(),
+        };
+        await db.collection('users').insertOne(leader);
+        await audit(db, { userId: user.id, action: 'auto_create_team_leader', entityType: 'users', entityId: leader.id, after: { ...leader, passwordHash: '[REDACTED]' } });
+      } else {
+        await db.collection('users').updateOne({ id: leader.id }, { $set: { teamId, role: ROLES.TEAM, isTeamLeader: true } });
+      }
+
+      // Build members list — include leader by default (with salary if admin provided)
+      const rawMembers = Array.isArray(body.members) ? body.members : [];
+      const cleanedMembers = rawMembers
+        .filter(m => (m?.name || '').trim())
+        .map(m => ({
+          id: m.id || uuidv4(),
+          name: String(m.name).trim(),
+          contact: m.contact || '',
+          dailySalary: Number(m.dailySalary) || 0,
+          userId: m.userId || null,
+        }));
+      // Ensure leader is a member (dedupe by userId or email match)
+      const leaderInList = cleanedMembers.some(m => m.userId === leader.id || (m.contact && leader.mobile && m.contact.replace(/\D/g, '') === leader.mobile));
+      if (!leaderInList) {
+        cleanedMembers.unshift({
+          id: uuidv4(),
+          name: leader.name,
+          contact: leader.mobile || '',
+          dailySalary: Number(body.leaderDailySalary) || 0,
+          userId: leader.id,
+        });
+      }
+
+      const teamDoc = {
+        id: teamId,
+        name: body.name.trim(),
+        leaderId: leader.id,
+        leaderName: leader.name,
+        leaderEmail,
+        members: cleanedMembers,
+        createdBy: user.id,
+        createdAt: new Date(),
+      };
+      await db.collection('teams').insertOne(teamDoc);
+      await audit(db, { userId: user.id, action: 'create', entityType: 'teams', entityId: teamId, after: teamDoc });
+
+      // Email leader credentials (only if we just created them)
+      let leaderEmailed = false, leaderEmailError = null;
+      if (leaderTempPw) {
+        try {
+          const { sendNotificationEmail } = await import('@/lib/mailer');
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+          const emailBody = `Welcome to FINLIT360! Your Team Leader account has been created by ${user.name} for team <b>${teamDoc.name}</b>.<br/><br/>
+            <b>Username:</b> ${leader.username}<br/>
+            <b>Temporary password:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace">${leaderTempPw}</code><br/><br/>
+            Please sign in and you will be asked to set your own password on first login.`;
+          await sendNotificationEmail({ to: leader.email, subject: 'Your FINLIT360 Team Leader account', name: leader.name, body: emailBody, cta: { url: baseUrl, label: 'Sign in to FINLIT360' } });
+          leaderEmailed = true;
+        } catch (e) { leaderEmailError = e.message; console.error('Team Leader welcome email failed:', e.message); }
+      }
+      return cors(NextResponse.json({ ...clean(teamDoc), _leaderTempPassword: leaderTempPw, _leaderEmailed: leaderEmailed, _leaderEmailError: leaderEmailError }));
+    }
+
     // Generic CRUD for these collections
     const crud = ['banks', 'regional_offices', 'districts', 'branches', 'villages', 'teams', 'users'];
     for (const c of crud) {
@@ -600,6 +689,10 @@ async function handle(request, { params }) {
           // For branches, also unlink the assigned branch manager (don't delete the user)
           if (c === 'branches' && before.managerId) {
             await db.collection('users').updateOne({ id: before.managerId }, { $unset: { branchId: '' } });
+          }
+          // For teams, unlink all users pointing to this team (don't delete users)
+          if (c === 'teams') {
+            await db.collection('users').updateMany({ teamId: id }, { $unset: { teamId: '', isTeamLeader: '' } });
           }
           await audit(db, { userId: user.id, action: 'delete', entityType: c, entityId: id, before });
           return cors(NextResponse.json({ success: true }));

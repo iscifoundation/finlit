@@ -958,6 +958,7 @@ async function handle(request, { params }) {
           // Team uploads execution data (photos, participants, expenses)
           if (![ROLES.TEAM, ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
           if (!prog.branchConfirmed && user.role === ROLES.TEAM) return cors(NextResponse.json({ error: 'Program must be confirmed by Branch Manager first' }, { status: 400 }));
+          if (prog.status === 'authenticated') return cors(NextResponse.json({ error: 'Program is authenticated. Ask Admin to request re-authentication before editing.' }, { status: 409 }));
           const payload = {};
           if (body.photos) payload.photos = body.photos.map(p => ({ id: uuidv4(), data: p.data, gps: p.gps || null, source: p.source || 'camera', uploadedAt: new Date() }));
           if (body.participants !== undefined) payload.participants = +body.participants;
@@ -982,7 +983,9 @@ async function handle(request, { params }) {
           await audit(db, { userId: user.id, action: 'upload_data', entityType: 'programs', entityId: id });
         } else if (action === 'delete-photo') {
           if (![ROLES.TEAM, ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+          if (prog.status === 'authenticated') return cors(NextResponse.json({ error: 'Program is authenticated. Ask Admin to request re-authentication before editing.' }, { status: 409 }));
           await db.collection('programs').updateOne({ id }, { $pull: { photos: { id: body.photoId } } });
+          await timeline(db, id, 'photo_removed', user.id, `Photo removed by ${user.name}`);
         } else if (action === 'authenticate') {
           if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
           if ((prog.photos || []).length < 4) return cors(NextResponse.json({ error: 'At least 4 photos required' }, { status: 400 }));

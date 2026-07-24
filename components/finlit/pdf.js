@@ -77,21 +77,39 @@ export function downloadProgramPdf(p, refs) {
   line('Status:', (p.status || '').replace('_', ' '));
   if (p.remarks) { line('Remarks:', p.remarks); }
 
-  // Photos - A6 size (approx 105x148mm each, 2 photos per page)
+  // Photos — 16:9 landscape, 2 per page (large enough to read details)
   const photos = (p.photos || []).filter(ph => ph.data).slice(0, 4);
+  const PHOTO_W = 170; // mm — full width minus margins on A4 portrait (210 - 2*20)
+  const PHOTO_H = Math.round((PHOTO_W * 9) / 16); // 16:9 => ~96mm
   if (photos.length) {
     photos.forEach((ph, i) => {
       if (i === 0) {
-        // Continue on current page if room, else new page
-        if (y > 130) { doc.addPage(); header(doc); y = 44; }
+        doc.addPage(); header(doc); y = 44;
         doc.setFont('helvetica', 'bold');
-        doc.text('Photo Evidence', 20, y); y += 4;
+        doc.setFontSize(11);
+        doc.text('Photo Evidence', 20, y); y += 6;
       } else if (i % 2 === 0) {
         doc.addPage(); header(doc); y = 44;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.text(`Photo Evidence (${i + 1}-${Math.min(i + 2, photos.length)} of ${photos.length})`, 20, y); y += 6;
       }
-      try { doc.addImage(ph.data, 'JPEG', 25, y + (i % 2) * 130, 160, 120); } catch (e) { /* ignore */ }
+      const slot = i % 2; // 0 or 1
+      const yTop = y + slot * (PHOTO_H + 14);
+      try { doc.addImage(ph.data, 'JPEG', 20, yTop, PHOTO_W, PHOTO_H); } catch (e) { /* ignore */ }
+      // Caption strip
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(90);
+      const captionY = yTop + PHOTO_H + 4;
+      let caption = `Photo ${i + 1}`;
+      if (ph.gps?.lat != null && ph.gps?.lng != null) caption += `   |   GPS: ${(+ph.gps.lat).toFixed(5)}, ${(+ph.gps.lng).toFixed(5)}`;
+      if (ph.uploadedAt) caption += `   |   ${new Date(ph.uploadedAt).toLocaleString('en-IN')}`;
+      doc.text(caption, 20, captionY);
+      doc.setTextColor(0);
     });
-    y += 260;
+    // Ensure signature block goes to a new page
+    y = 999;
   }
 
   if (y > 240) doc.addPage();
@@ -261,10 +279,25 @@ export function downloadROReportPdf(programs, refs, options = {}) {
       if (p.remarks) line('Remarks:', p.remarks);
 
       const photos = (p.photos || []).filter(ph => ph.data).slice(0, 4);
+      const PHOTO_W_C = 170;
+      const PHOTO_H_C = Math.round((PHOTO_W_C * 9) / 16);
       if (photos.length) {
         photos.forEach((ph, i) => {
-          if (i % 2 === 0) { doc.addPage(); header(doc); y = 44; doc.setFont('helvetica','bold'); doc.text(`${p.code} - Photo Evidence (${i+1}-${Math.min(i+2, photos.length)} of ${photos.length})`, 20, y); y += 4; }
-          try { doc.addImage(ph.data, 'JPEG', 25, y + (i % 2) * 130, 160, 120); } catch (e) { /* skip */ }
+          if (i % 2 === 0) {
+            doc.addPage(); header(doc); y = 44;
+            doc.setFont('helvetica','bold'); doc.setFontSize(11);
+            doc.text(`${p.code} — Photo Evidence (${i+1}-${Math.min(i+2, photos.length)} of ${photos.length})`, 20, y);
+            y += 6;
+          }
+          const slot = i % 2;
+          const yTop = y + slot * (PHOTO_H_C + 14);
+          try { doc.addImage(ph.data, 'JPEG', 20, yTop, PHOTO_W_C, PHOTO_H_C); } catch (e) { /* skip */ }
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(90);
+          let cap = `Photo ${i + 1}`;
+          if (ph.gps?.lat != null && ph.gps?.lng != null) cap += `   |   GPS: ${(+ph.gps.lat).toFixed(5)}, ${(+ph.gps.lng).toFixed(5)}`;
+          if (ph.uploadedAt) cap += `   |   ${new Date(ph.uploadedAt).toLocaleString('en-IN')}`;
+          doc.text(cap, 20, yTop + PHOTO_H_C + 4);
+          doc.setTextColor(0);
         });
       } else {
         y += 4;

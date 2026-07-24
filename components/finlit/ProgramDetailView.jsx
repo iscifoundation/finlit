@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { api, STATUS, ROLES, ROLE_LABELS, inr } from '@/lib/finlit/api';
-import { ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck, PlayCircle, MapPin, Calendar, Users, Camera, Download, Wallet, Building2, Clock, UsersRound } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck, PlayCircle, MapPin, Calendar, Users, Camera, Download, Wallet, Building2, Clock, UsersRound, ImageIcon, X as XIcon, Edit3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadProgramPdf } from './pdf';
 
@@ -19,6 +19,7 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
   const [dialog, setDialog] = useState(null);
   const [fd, setFd] = useState({});
   const [busy, setBusy] = useState(false);
+  const [lightbox, setLightbox] = useState(null); // { src, index }
 
   const load = () => api(`/programs/${id}`).then(setP).catch(e => toast.error(e.message));
 
@@ -73,11 +74,15 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
   if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.TEAM].includes(user.role) && p.status === 'confirmed') {
     actions.push({ k: 'execute', label: 'Conduct Program', Icon: PlayCircle, special: true });
   }
+  // Edit photos — allowed for team/PM/admin before authentication (once photos exist)
+  if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.TEAM].includes(user.role) && p.status === 'conducted' && (p.photos || []).length > 0) {
+    actions.push({ k: 'execute', label: 'Edit Photos / Data', Icon: Edit3, variant: 'outline', special: true });
+  }
   if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role) && p.status === 'conducted') {
     actions.push({ k: 'authenticate', label: 'Authenticate', Icon: ShieldCheck });
   }
   if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role) && p.status === 'authenticated') {
-    actions.push({ k: 'unauthenticate', label: 'Revert Authentication', Icon: RefreshCw, variant: 'outline' });
+    actions.push({ k: 'unauthenticate', label: 'Request Re-authentication', Icon: RefreshCw, variant: 'outline' });
   }
   const canSeeExpense = [ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.TEAM].includes(user.role);
   const canPdf = ['conducted', 'authenticated'].includes(p.status);
@@ -120,11 +125,21 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
             {(p.photos || []).length > 0 && (
               <div>
                 <div className="flex items-center gap-2 mb-2"><Camera className="w-4 h-4 text-slate-500" /><div className="text-sm font-medium">Photos ({p.photos.length}/4)</div></div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {p.photos.map((ph, i) => (
-                    <div key={ph.id} className="aspect-square rounded-lg border overflow-hidden bg-slate-50">
-                      {ph.data ? <img src={ph.data} alt={`Photo ${i+1}`} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-300"><Camera className="w-6 h-6" /></div>}
-                    </div>
+                    <button
+                      type="button"
+                      key={ph.id}
+                      onClick={() => ph.data && setLightbox({ src: ph.data, index: i, gps: ph.gps })}
+                      className="group relative aspect-video rounded-lg border overflow-hidden bg-slate-50 hover:ring-2 hover:ring-primary/40 focus:outline-none focus:ring-2 focus:ring-primary transition"
+                    >
+                      {ph.data
+                        ? <img src={ph.data} alt={`Photo ${i+1}`} className="w-full h-full object-cover" />
+                        : <div className="w-full h-full flex items-center justify-center text-slate-300"><Camera className="w-6 h-6" /></div>}
+                      <div className="absolute top-1.5 left-1.5 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded">#{i+1}</div>
+                      {ph.gps && <div className="absolute bottom-1.5 left-1.5 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded">📍 {(+ph.gps.lat).toFixed(4)}, {(+ph.gps.lng).toFixed(4)}</div>}
+                      {ph.data && <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition"><ImageIcon className="w-6 h-6 text-white drop-shadow" /></div>}
+                    </button>
                   ))}
                 </div>
               </div>
@@ -215,6 +230,32 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Photo Lightbox */}
+      {lightbox && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[100] bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            aria-label="Close"
+            onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
+            className="absolute top-4 right-4 text-white/80 hover:text-white bg-black/40 hover:bg-black/60 rounded-full w-10 h-10 flex items-center justify-center transition"
+          >
+            <XIcon className="w-5 h-5" />
+          </button>
+          <div className="max-w-[95vw] max-h-[92vh] flex flex-col items-center" onClick={e => e.stopPropagation()}>
+            <img src={lightbox.src} alt={`Photo ${lightbox.index + 1}`} className="max-w-full max-h-[86vh] object-contain rounded-md shadow-2xl" />
+            <div className="mt-3 flex items-center gap-3 text-white/80 text-xs">
+              <span>Photo {lightbox.index + 1} / {(p.photos || []).length}</span>
+              {lightbox.gps && <span>📍 {(+lightbox.gps.lat).toFixed(5)}, {(+lightbox.gps.lng).toFixed(5)}</span>}
+              <a href={lightbox.src} download={`${p.code}-photo-${lightbox.index + 1}.jpg`} onClick={e => e.stopPropagation()} className="underline hover:text-white">Download</a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

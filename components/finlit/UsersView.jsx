@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { api, ROLES, ROLE_LABELS } from '@/lib/finlit/api';
-import { Plus, Trash2, Edit, Users, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Edit, Users, AlertCircle, KeyRound, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
 const ROLE_BADGE = {
@@ -47,11 +47,13 @@ export default function UsersView({ user }) {
   const openNew = () => { setForm({ name: '', mobile: '', role: '', email: '', branchId: '', roId: '', teamId: '' }); setDialog('new'); };
   const openEdit = (u) => { setForm({ name: u.name || '', mobile: u.mobile || '', role: u.role || '', email: u.email || '', branchId: u.branchId || '', roId: u.roId || '', teamId: u.teamId || '' }); setDialog(u.id); };
 
+  const [credsInfo, setCredsInfo] = useState(null); // { email, username, tempPassword, emailed, emailError, title }
+
   const submit = async () => {
     if (!form.name.trim()) return toast.error('Name is required');
     if (!form.role) return toast.error('Select a role');
     const emailNorm = (form.email || '').toLowerCase().trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) return toast.error('A valid email is required — users log in via magic link');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) return toast.error('A valid email is required — credentials will be emailed here');
     const mobileNorm = (form.mobile || '').replace(/\D/g, '');
     if (mobileNorm && !/^\d{10}$/.test(mobileNorm)) return toast.error('Mobile must be 10 digits (or leave blank)');
     const payload = { name: form.name.trim(), mobile: mobileNorm || null, role: form.role, email: emailNorm };
@@ -61,17 +63,44 @@ export default function UsersView({ user }) {
     setBusy(true);
     try {
       if (dialog === 'new') {
-        await api('/users', { method: 'POST', body: JSON.stringify(payload) });
+        const r = await api('/users', { method: 'POST', body: JSON.stringify(payload) });
         toast.success('User created');
+        setDialog(null); load();
+        // Show generated credentials so admin can copy/share if email failed
+        if (r?._tempPassword) {
+          setCredsInfo({
+            title: 'User created',
+            username: r.username || r.email,
+            email: r.email,
+            tempPassword: r._tempPassword,
+            emailed: r._emailed,
+            emailError: r._emailError,
+          });
+        }
       } else {
         const upd = { ...payload }; delete upd.mobile; // mobile is not editable
         if (!isAdmin) delete upd.role; // PM can't change role
         await api(`/users/${dialog}`, { method: 'PATCH', body: JSON.stringify(upd) });
         toast.success('User updated');
+        setDialog(null); load();
       }
-      setDialog(null); load();
     } catch (e) { toast.error(e.message); }
     setBusy(false);
+  };
+
+  const resetPassword = async (u) => {
+    try {
+      const r = await api(`/auth/reset-password/${u.id}`, { method: 'POST' });
+      setCredsInfo({
+        title: `Password reset for ${u.name}`,
+        username: u.username || u.email,
+        email: u.email,
+        tempPassword: r.tempPassword,
+        emailed: r.emailed,
+        emailError: r.emailError,
+      });
+      toast.success('Password reset');
+    } catch (e) { toast.error(e.message); }
   };
 
   const del = async () => {
@@ -131,6 +160,7 @@ export default function UsersView({ user }) {
                     </td>
                     <td className="p-3 text-slate-600 text-xs">{branch || ro || team || '—'}</td>
                     <td className="p-3 text-right whitespace-nowrap">
+                      {canEdit && <Button size="icon" variant="ghost" onClick={() => resetPassword(u)} className="h-8 w-8" title="Reset password"><KeyRound className="w-4 h-4 text-amber-600" /></Button>}
                       {canEdit && <Button size="icon" variant="ghost" onClick={() => openEdit(u)} className="h-8 w-8"><Edit className="w-4 h-4" /></Button>}
                       {canDelete && <Button size="icon" variant="ghost" onClick={() => setConfirmDel(u)} className="h-8 w-8"><Trash2 className="w-4 h-4 text-red-500" /></Button>}
                     </td>
@@ -222,6 +252,47 @@ export default function UsersView({ user }) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmDel(null)}>Cancel</Button>
             <Button variant="destructive" onClick={del}>Remove</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!credsInfo} onOpenChange={o => !o && setCredsInfo(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{credsInfo?.title || 'Credentials'}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {credsInfo?.emailed ? (
+              <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-800 flex items-start gap-2">
+                <Check className="w-4 h-4 mt-0.5" /><div>Credentials emailed to <b>{credsInfo.email}</b>.</div>
+              </div>
+            ) : (
+              <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 mt-0.5" />
+                <div>Email delivery failed{credsInfo?.emailError ? `: ${credsInfo.emailError}` : ''}. Please share these credentials with the user manually.</div>
+              </div>
+            )}
+            <div className="rounded-lg border border-slate-200 divide-y">
+              <div className="p-3 flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] text-slate-500 uppercase tracking-wide">Username</div>
+                  <div className="font-mono text-sm">{credsInfo?.username}</div>
+                </div>
+                <Button size="icon" variant="ghost" onClick={() => { navigator.clipboard?.writeText(credsInfo?.username || ''); toast.success('Copied'); }}>
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+              <div className="p-3 flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] text-slate-500 uppercase tracking-wide">Temporary password</div>
+                  <div className="font-mono text-sm">{credsInfo?.tempPassword}</div>
+                </div>
+                <Button size="icon" variant="ghost" onClick={() => { navigator.clipboard?.writeText(credsInfo?.tempPassword || ''); toast.success('Copied'); }}>
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="text-[11px] text-slate-500">The user will be asked to set a new password on their next sign-in.</div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setCredsInfo(null)}>Done</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

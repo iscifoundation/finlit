@@ -28,6 +28,8 @@ export default function EntitiesView({ user }) {
 
   const isAdmin = user.role === ROLES.ADMIN;
 
+  const [bmCreds, setBmCreds] = useState(null); // { username, tempPassword, emailed, emailError }
+
   const create = async (endpoint) => {
     try {
       const body = { ...form };
@@ -35,9 +37,18 @@ export default function EntitiesView({ user }) {
       if ('programsAllocated' in body) body.programsAllocated = +body.programsAllocated;
       if ('lat' in body) body.lat = +body.lat;
       if ('lng' in body) body.lng = +body.lng;
-      await api(`/${endpoint}`, { method: 'POST', body: JSON.stringify(body) });
+      const r = await api(`/${endpoint}`, { method: 'POST', body: JSON.stringify(body) });
       toast.success('Created');
       setDialog(null); setForm({}); load();
+      if (endpoint === 'branches' && r?._bmTempPassword) {
+        setBmCreds({
+          username: body.branchManagerEmail,
+          tempPassword: r._bmTempPassword,
+          emailed: r._bmEmailed,
+          emailError: r._bmEmailError,
+          email: body.branchManagerEmail,
+        });
+      }
     } catch (e) { toast.error(e.message); }
   };
 
@@ -131,6 +142,29 @@ export default function EntitiesView({ user }) {
           <Field label="Expected Audience" type="number" val={form.expectedAudience} set={v => setForm({ ...form, expectedAudience: v })} />
         </FormDialog>
       )}
+
+      <Dialog open={!!bmCreds} onOpenChange={o => !o && setBmCreds(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Branch Manager credentials</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {bmCreds?.emailed
+              ? <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-800">Credentials emailed to <b>{bmCreds.email}</b>.</div>
+              : <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">Email delivery failed{bmCreds?.emailError ? `: ${bmCreds.emailError}` : ''}. Please share these credentials with the Branch Manager manually.</div>}
+            <div className="rounded-lg border divide-y">
+              <div className="p-3">
+                <div className="text-[11px] text-slate-500 uppercase">Username</div>
+                <div className="font-mono text-sm">{bmCreds?.username}</div>
+              </div>
+              <div className="p-3">
+                <div className="text-[11px] text-slate-500 uppercase">Temporary password</div>
+                <div className="font-mono text-sm">{bmCreds?.tempPassword}</div>
+              </div>
+            </div>
+            <div className="text-[11px] text-slate-500">The Branch Manager will be asked to set a new password on first sign-in.</div>
+          </div>
+          <DialogFooter><Button onClick={() => setBmCreds(null)}>Done</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

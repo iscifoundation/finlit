@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import bcrypt from 'bcryptjs';
 
 function cors(r) {
   r.headers.set('Access-Control-Allow-Origin', process.env.CORS_ORIGINS || '*');
@@ -20,11 +21,25 @@ const ROLES = {
 
 const DEMO_OTP = '123456';
 const PRIMARY_ADMIN_EMAIL = 'info@iscifoundation.org';
+const PRIMARY_ADMIN_USERNAME = 'Admin';
+const PRIMARY_ADMIN_DEFAULT_PW = 'Password';
 const PRIMARY_ADMIN_NAME = 'Mohit Modi';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const clean = d => { if (!d) return d; const { _id, ...r } = d; return r; };
+const clean = d => { if (!d) return d; const { _id, passwordHash, ...r } = d; return r; };
 const cleanArr = a => a.map(clean);
+
+function hashPw(pw) { return bcrypt.hashSync(String(pw), 10); }
+function checkPw(pw, hash) { try { return bcrypt.compareSync(String(pw), String(hash || '')); } catch { return false; } }
+function genPassword(len = 10) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  // ensure at least one digit and one letter
+  if (!/\d/.test(out)) out = out.slice(0, -1) + '7';
+  if (!/[a-zA-Z]/.test(out)) out = 'A' + out.slice(1);
+  return out;
+}
 
 async function audit(db, { userId, action, entityType, entityId, before, after }) {
   await db.collection('audit_logs').insertOne({
@@ -82,28 +97,50 @@ async function seedIfEmpty(db) {
     console.log('[FINLIT360] Cleared legacy demo/random seed data');
   }
 
-  // Ensure primary admin exists (idempotent)
-  const primary = await db.collection('users').findOne({ email: PRIMARY_ADMIN_EMAIL });
+  // Ensure primary admin exists (idempotent) — with username=Admin / password=Password / mustChangePassword=true
+  const primary = await db.collection('users').findOne({ $or: [{ username: PRIMARY_ADMIN_USERNAME }, { email: PRIMARY_ADMIN_EMAIL }] });
   if (!primary) {
     const existingAdmin = await db.collection('users').findOne({ role: ROLES.ADMIN });
+    const passwordHash = hashPw(PRIMARY_ADMIN_DEFAULT_PW);
     if (existingAdmin) {
-      // Overwrite existing admin's email to the canonical primary admin email
       await db.collection('users').updateOne(
         { id: existingAdmin.id },
-        { $set: { email: PRIMARY_ADMIN_EMAIL, name: existingAdmin.name || PRIMARY_ADMIN_NAME, isDemo: false, updatedAt: now } }
+        { $set: {
+          username: PRIMARY_ADMIN_USERNAME,
+          email: PRIMARY_ADMIN_EMAIL,
+          name: existingAdmin.name || PRIMARY_ADMIN_NAME,
+          passwordHash, mustChangePassword: true,
+          isDemo: false, updatedAt: now,
+        } }
       );
-      console.log(`[FINLIT360] Migrated existing admin -> ${PRIMARY_ADMIN_EMAIL}`);
+      console.log(`[FINLIT360] Migrated existing admin -> username="${PRIMARY_ADMIN_USERNAME}"`);
     } else {
       await db.collection('users').insertOne({
         id: uuidv4(),
+        username: PRIMARY_ADMIN_USERNAME,
         name: PRIMARY_ADMIN_NAME,
         email: PRIMARY_ADMIN_EMAIL,
         mobile: null,
         role: ROLES.ADMIN,
+        passwordHash,
+        mustChangePassword: true,
         isDemo: false,
         createdAt: now,
       });
-      console.log(`[FINLIT360] Bootstrapped primary admin ${PRIMARY_ADMIN_EMAIL}`);
+      console.log(`[FINLIT360] Bootstrapped primary admin username="${PRIMARY_ADMIN_USERNAME}" password="${PRIMARY_ADMIN_DEFAULT_PW}"`);
+    }
+  } else {
+    // Ensure username field exists on the primary admin document
+    if (!primary.username || !primary.passwordHash) {
+      await db.collection('users').updateOne(
+        { id: primary.id },
+        { $set: {
+          username: PRIMARY_ADMIN_USERNAME,
+          passwordHash: primary.passwordHash || hashPw(PRIMARY_ADMIN_DEFAULT_PW),
+          mustChangePassword: primary.mustChangePassword ?? true,
+          updatedAt: now,
+        } }
+      );
     }
   }
 
@@ -142,11 +179,34 @@ async function handle(request, { params }) {
       return cors(NextResponse.json({ success: true, demoOtp: DEMO_OTP, mobile }));
     }
 
-    // ---- MAGIC LINK AUTH ----
+    // ---- USERNAME + PASSWORD LOGIN ----
+    if (route === '/auth/login' && method === 'POST') {
+      const { username, password } = await request.json();
+      const idRaw = String(username || '').trim();
+      if (!idRaw || !password) return cors(NextResponse.json({ error: 'Username and password are required' }, { status: 400 }));
+      // Match on username (case-insensitive) OR email (lowercase)
+      const idLower = idRaw.toLowerCase();
+      const u = await db.collection('users').findOne({
+        $or: [
+          { username: idRaw },
+          { username: idLower },
+          { email: idLower },
+        ],
+      });
+      if (!u) return cors(NextResponse.json({ error: 'Invalid username or password' }, { status: 401 }));
+      if (!u.passwordHash) return cors(NextResponse.json({ error: 'Account has no password set. Contact your administrator.' }, { status: 401 }));
+      if (!checkPw(password, u.passwordHash)) return cors(NextResponse.json({ error: 'Invalid username or password' }, { status: 401 }));
+      const token = uuidv4();
+      await db.collection('sessions').insertOne({ token, userId: u.id, createdAt: new Date(), expiresAt: new Date(Date.now() + 30 * 86400 * 1000) });
+      await audit(db, { userId: u.id, action: 'login_password', entityType: 'session', entityId: token });
+      return cors(NextResponse.json({ token, user: clean(u), mustChangePassword: !!u.mustChangePassword }));
+    }
+
+    // ---- MAGIC LINK AUTH (legacy — kept for backwards compat but hidden in UI) ----
     if (route === '/auth/magic-link' && method === 'POST') {
       const { email } = await request.json();
       const normalized = String(email || '').toLowerCase().trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return cors(NextResponse.json({ error: 'Enter a valid email address' }, { status: 400 }));
+      if (!EMAIL_RE.test(normalized)) return cors(NextResponse.json({ error: 'Enter a valid email address' }, { status: 400 }));
       const u = await db.collection('users').findOne({ email: normalized });
       if (!u) return cors(NextResponse.json({ error: 'Email not registered. Contact your administrator.' }, { status: 404 }));
       const token = uuidv4() + uuidv4().replace(/-/g, '');
@@ -235,6 +295,53 @@ async function handle(request, { params }) {
     }
     if (!user) return cors(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
 
+    // ---- CHANGE PASSWORD (self) ----
+    if (route === '/auth/change-password' && method === 'POST') {
+      const { oldPassword, newPassword } = await request.json();
+      if (!newPassword || String(newPassword).length < 6) return cors(NextResponse.json({ error: 'New password must be at least 6 characters' }, { status: 400 }));
+      // First-time change (mustChangePassword) may skip oldPassword only if user has never set a real password;
+      // still, we require oldPassword to prevent session hijacking scenarios
+      if (!checkPw(oldPassword, user.passwordHash)) return cors(NextResponse.json({ error: 'Current password is incorrect' }, { status: 401 }));
+      await db.collection('users').updateOne(
+        { id: user.id },
+        { $set: { passwordHash: hashPw(newPassword), mustChangePassword: false, passwordChangedAt: new Date() } }
+      );
+      await audit(db, { userId: user.id, action: 'change_password', entityType: 'users', entityId: user.id });
+      return cors(NextResponse.json({ success: true }));
+    }
+
+    // ---- RESET USER PASSWORD (admin/PM for scoped users) ----
+    if (route.match(/^\/auth\/reset-password\/([^/]+)$/) && method === 'POST') {
+      const targetId = route.match(/^\/auth\/reset-password\/([^/]+)$/)[1];
+      const target = await db.collection('users').findOne({ id: targetId });
+      if (!target) return cors(NextResponse.json({ error: 'User not found' }, { status: 404 }));
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      if (user.role === ROLES.PROGRAM_MANAGER && ![ROLES.BRANCH_MANAGER, ROLES.TEAM].includes(target.role)) {
+        return cors(NextResponse.json({ error: 'Program Manager can only reset Branch Manager or Team passwords' }, { status: 403 }));
+      }
+      const newPw = genPassword(10);
+      await db.collection('users').updateOne(
+        { id: targetId },
+        { $set: { passwordHash: hashPw(newPw), mustChangePassword: true, passwordChangedAt: new Date() } }
+      );
+      // Attempt to email new credentials
+      let emailed = false, emailError = null;
+      if (target.email) {
+        try {
+          const { sendNotificationEmail } = await import('@/lib/mailer');
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+          const body = `Your FINLIT360 password has been reset by ${user.name}.<br/><br/>
+            <b>Username:</b> ${target.username || target.email}<br/>
+            <b>Temporary password:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace">${newPw}</code><br/><br/>
+            You will be asked to set a new password on your next login.`;
+          await sendNotificationEmail({ to: target.email, subject: 'FINLIT360 password reset', name: target.name, body, cta: { url: baseUrl, label: 'Sign in to FINLIT360' } });
+          emailed = true;
+        } catch (e) { emailError = e.message; console.error('Password reset email failed:', e.message); }
+      }
+      await audit(db, { userId: user.id, action: 'reset_password', entityType: 'users', entityId: targetId });
+      return cors(NextResponse.json({ success: true, tempPassword: newPw, emailed, emailError }));
+    }
+
     // USER MANAGEMENT (special rules: only NON-DEMO Admin/PM can manage)
     if (route === '/users' && method === 'POST') {
       if (user.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot add new users. Please sign in with your real account.' }, { status: 403 }));
@@ -262,19 +369,36 @@ async function handle(request, { params }) {
       }
       const doc = {
         id: uuidv4(),
+        username: emailNorm, // email is the username for created users
         name: body.name.trim(), mobile: mobileRaw || null, role: body.role,
         email: emailNorm, isDemo: false, createdAt: new Date(), createdBy: user.id,
       };
+      // Auto-generate a temporary password + require change on first login
+      const tempPassword = genPassword(10);
+      doc.passwordHash = hashPw(tempPassword);
+      doc.mustChangePassword = true;
       if (body.role === ROLES.BRANCH_MANAGER && body.branchId) doc.branchId = body.branchId;
       if (body.role === ROLES.REGIONAL_OFFICE && body.roId) doc.roId = body.roId;
       if (body.role === ROLES.TEAM && body.teamId) doc.teamId = body.teamId;
       await db.collection('users').insertOne(doc);
-      await audit(db, { userId: user.id, action: 'create_user', entityType: 'users', entityId: doc.id, after: doc });
+      await audit(db, { userId: user.id, action: 'create_user', entityType: 'users', entityId: doc.id, after: { ...doc, passwordHash: '[REDACTED]' } });
       // If BM assigned to branch, also set branch.managerId + managerName
       if (doc.role === ROLES.BRANCH_MANAGER && doc.branchId) {
         await db.collection('branches').updateOne({ id: doc.branchId }, { $set: { managerId: doc.id, managerName: doc.name } });
       }
-      return cors(NextResponse.json(clean(doc)));
+      // Email the temp credentials
+      let emailed = false, emailError = null;
+      try {
+        const { sendNotificationEmail } = await import('@/lib/mailer');
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+        const body2 = `Welcome to FINLIT360! Your account has been created by ${user.name}.<br/><br/>
+          <b>Username:</b> ${doc.username}<br/>
+          <b>Temporary password:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace">${tempPassword}</code><br/><br/>
+          Please sign in and you will be asked to set your own password on first login.`;
+        await sendNotificationEmail({ to: doc.email, subject: 'Your FINLIT360 account is ready', name: doc.name, body: body2, cta: { url: baseUrl, label: 'Sign in to FINLIT360' } });
+        emailed = true;
+      } catch (e) { emailError = e.message; console.error('Welcome email failed:', e.message); }
+      return cors(NextResponse.json({ ...clean(doc), _tempPassword: tempPassword, _emailed: emailed, _emailError: emailError }));
     }
 
     const uMatch = route.match(/^\/users\/([^/]+)$/);
@@ -339,20 +463,25 @@ async function handle(request, { params }) {
       const doc = { id: uuidv4(), name: body.name.trim(), code: body.code, address: body.address, districtId: body.districtId, createdAt: new Date() };
       // Ensure BM user exists and is linked
       let bmUser = await db.collection('users').findOne({ email: bmEmail });
+      let bmTempPw = null;
       if (!bmUser) {
         if (user.isDemo) return cors(NextResponse.json({ error: 'Demo users cannot auto-create Branch Manager accounts. Sign in with your real account.' }, { status: 403 }));
+        bmTempPw = genPassword(10);
         bmUser = {
           id: uuidv4(),
+          username: bmEmail,
           name: (body.branchManagerName || bmEmail.split('@')[0]).trim(),
           email: bmEmail,
           mobile: body.branchManagerMobile || null,
           role: ROLES.BRANCH_MANAGER,
           branchId: doc.id,
+          passwordHash: hashPw(bmTempPw),
+          mustChangePassword: true,
           isDemo: false,
           createdBy: user.id, createdAt: new Date(),
         };
         await db.collection('users').insertOne(bmUser);
-        await audit(db, { userId: user.id, action: 'auto_create_bm', entityType: 'users', entityId: bmUser.id, after: bmUser });
+        await audit(db, { userId: user.id, action: 'auto_create_bm', entityType: 'users', entityId: bmUser.id, after: { ...bmUser, passwordHash: '[REDACTED]' } });
       } else {
         await db.collection('users').updateOne({ id: bmUser.id }, { $set: { branchId: doc.id, role: ROLES.BRANCH_MANAGER } });
       }
@@ -361,7 +490,21 @@ async function handle(request, { params }) {
       doc.managerEmail = bmEmail;
       await db.collection('branches').insertOne(doc);
       await audit(db, { userId: user.id, action: 'create', entityType: 'branches', entityId: doc.id, after: doc });
-      return cors(NextResponse.json(clean(doc)));
+      // Email the new BM their credentials (only if we just created them)
+      let bmEmailed = false, bmEmailError = null;
+      if (bmTempPw) {
+        try {
+          const { sendNotificationEmail } = await import('@/lib/mailer');
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+          const body2 = `Welcome to FINLIT360! Your Branch Manager account has been created by ${user.name} for branch <b>${doc.name}</b>.<br/><br/>
+            <b>Username:</b> ${bmUser.username}<br/>
+            <b>Temporary password:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace">${bmTempPw}</code><br/><br/>
+            Please sign in and you will be asked to set your own password on first login.`;
+          await sendNotificationEmail({ to: bmUser.email, subject: 'Your FINLIT360 Branch Manager account', name: bmUser.name, body: body2, cta: { url: baseUrl, label: 'Sign in to FINLIT360' } });
+          bmEmailed = true;
+        } catch (e) { bmEmailError = e.message; console.error('BM welcome email failed:', e.message); }
+      }
+      return cors(NextResponse.json({ ...clean(doc), _bmTempPassword: bmTempPw, _bmEmailed: bmEmailed, _bmEmailError: bmEmailError }));
     }
 
     // Generic CRUD for these collections

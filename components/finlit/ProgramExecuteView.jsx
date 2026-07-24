@@ -33,6 +33,7 @@ export default function ProgramExecuteView({ id, user, onBack }) {
   const [p, setP] = useState(null);
   const [village, setVillage] = useState(null);
   const [gps, setGps] = useState(null);
+  const [reusedGpsQueue, setReusedGpsQueue] = useState([]); // GPSes from deleted photos (used first in edit mode)
   const [participants, setParticipants] = useState(0);
   const [expenses, setExpenses] = useState({ taxi: 0, food: 0, refreshments: 0, stationary: 0, other: 0 });
   const [remarks, setRemarks] = useState('');
@@ -40,25 +41,34 @@ export default function ProgramExecuteView({ id, user, onBack }) {
   const camRef = useRef(null);
   const galRef = useRef(null);
 
+  // Edit mode: program is already conducted, admin/PM/team is replacing/adding photos.
+  const isEditMode = p?.status === 'conducted';
+
   useEffect(() => {
     api(`/programs/${id}`).then(async pp => {
       setP(pp);
       if (pp.participants) setParticipants(pp.participants);
       if (pp.expenses) setExpenses({ ...expenses, ...pp.expenses });
       if (pp.remarks) setRemarks(pp.remarks);
+      let v = null;
       if (pp.villageId) {
-        const v = await api(`/villages/${pp.villageId}`);
+        v = await api(`/villages/${pp.villageId}`);
         setVillage(v);
       }
+      // In edit mode, reuse the ORIGINAL capture GPS (from the first existing photo) — never re-fetch device location.
+      if (pp.status === 'conducted') {
+        const originalGps = (pp.photos || []).find(ph => ph.gps?.lat != null)?.gps;
+        if (originalGps) setGps({ ...originalGps, reused: true });
+        else if (v?.lat != null) setGps({ lat: v.lat, lng: v.lng, reused: true, fromVillage: true });
+      } else if (navigator.geolocation) {
+        // Fresh capture — fetch device GPS
+        navigator.geolocation.getCurrentPosition(
+          pos => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+          () => {},
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      }
     });
-    // capture GPS
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        pos => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-        () => {},
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
-    }
   }, [id]);
 
   if (!p) return <div className="text-slate-400">Loading...</div>;
@@ -68,9 +78,16 @@ export default function ProgramExecuteView({ id, user, onBack }) {
     setBusy(true);
     try {
       const data = [];
-      for (const f of files) data.push({ data: await compress(f), gps, source });
+      // In edit mode, use reused GPS queue first (from deleted photos), then fall back to base gps
+      const queue = [...reusedGpsQueue];
+      for (const f of files) {
+        let photoGps = gps;
+        if (isEditMode && queue.length > 0) photoGps = queue.shift();
+        data.push({ data: await compress(f), gps: photoGps, source });
+      }
       const r = await api(`/programs/${id}/upload-data`, { method: 'POST', body: JSON.stringify({ photos: data }) });
       setP(r);
+      setReusedGpsQueue(queue);
       toast.success(`${data.length} photo${data.length>1?'s':''} uploaded`);
     } catch (e) { toast.error(e.message); }
     setBusy(false);
@@ -78,6 +95,11 @@ export default function ProgramExecuteView({ id, user, onBack }) {
 
   const deletePhoto = async (photoId) => {
     try {
+      // Preserve the deleted photo's GPS so a replacement can inherit it in edit mode
+      if (isEditMode) {
+        const deletedGps = (p.photos || []).find(ph => ph.id === photoId)?.gps;
+        if (deletedGps) setReusedGpsQueue(q => [...q, deletedGps]);
+      }
       const r = await api(`/programs/${id}/delete-photo`, { method: 'POST', body: JSON.stringify({ photoId }) });
       setP(r);
     } catch (e) { toast.error(e.message); }
@@ -113,14 +135,25 @@ export default function ProgramExecuteView({ id, user, onBack }) {
             <div className="flex-1">
               <div className="font-medium">Location</div>
               {gps ? (
-                <div className="text-xs text-slate-500">{gps.lat.toFixed(6)}, {gps.lng.toFixed(6)} • ±{Math.round(gps.accuracy)}m</div>
+                <div className="text-xs text-slate-500">
+                  {gps.lat.toFixed(6)}, {gps.lng.toFixed(6)}
+                  {gps.accuracy ? <> • ±{Math.round(gps.accuracy)}m</> : null}
+                  {gps.reused && <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 border border-amber-200 rounded text-amber-800">
+                    <MapPin className="w-3 h-3" />{gps.fromVillage ? 'Village GPS' : 'Original capture'}
+                  </span>}
+                </div>
               ) : (
-                <div className="text-xs text-slate-500">Capturing GPS...</div>
+                <div className="text-xs text-slate-500">{isEditMode ? 'No original GPS on file' : 'Capturing GPS...'}</div>
+              )}
+              {isEditMode && (
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Editing after conduction — replacement photos reuse the ORIGINAL capture location (device GPS is not re-detected).
+                </div>
               )}
             </div>
-            <Button size="sm" variant="outline" onClick={() => navigator.geolocation.getCurrentPosition(pos => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }))}>Refresh</Button>
+            {!isEditMode && <Button size="sm" variant="outline" onClick={() => navigator.geolocation.getCurrentPosition(pos => setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }))}>Refresh</Button>}
           </div>
-          {village && gps && (() => {
+          {village && gps && !isEditMode && (() => {
             const d = Math.hypot((gps.lat - village.lat) * 111000, (gps.lng - village.lng) * 111000 * Math.cos(gps.lat * Math.PI / 180));
             return d > 500 && <div className="mt-2 text-xs text-amber-700 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />You are {Math.round(d)}m from planned village — please explain in remarks.</div>;
           })()}

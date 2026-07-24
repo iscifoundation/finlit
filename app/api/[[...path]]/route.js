@@ -507,43 +507,61 @@ async function handle(request, { params }) {
       return cors(NextResponse.json({ ...clean(doc), _bmTempPassword: bmTempPw, _bmEmailed: bmEmailed, _bmEmailError: bmEmailError }));
     }
 
-    // Special: Team POST with auto-create Team Leader user from email
+    // Special: Team POST with auto-create Team Leader user from email OR link an existing team-role user
     if (route === '/teams' && method === 'POST') {
       if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
       const body = await request.json();
       if (!body.name?.trim()) return cors(NextResponse.json({ error: 'Team name is required' }, { status: 400 }));
-      const leaderEmail = String(body.leaderEmail || '').toLowerCase().trim();
-      const leaderName = String(body.leaderName || '').trim();
-      if (!leaderName) return cors(NextResponse.json({ error: 'Team Leader name is required' }, { status: 400 }));
-      if (!EMAIL_RE.test(leaderEmail)) return cors(NextResponse.json({ error: 'A valid Team Leader email is required (used to create their login).' }, { status: 400 }));
 
       const teamId = uuidv4();
-      // Auto-create or link the leader user (role=TEAM)
-      let leader = await db.collection('users').findOne({ email: leaderEmail });
-      let leaderTempPw = null;
-      if (!leader) {
-        leaderTempPw = genPassword(10);
-        leader = {
-          id: uuidv4(),
-          username: leaderEmail,
-          name: leaderName,
-          email: leaderEmail,
-          mobile: (body.leaderMobile || '').trim() || null,
-          role: ROLES.TEAM,
-          teamId,
-          isTeamLeader: true,
-          passwordHash: hashPw(leaderTempPw),
-          mustChangePassword: true,
-          isDemo: false,
-          createdBy: user.id, createdAt: new Date(),
-        };
-        await db.collection('users').insertOne(leader);
-        await audit(db, { userId: user.id, action: 'auto_create_team_leader', entityType: 'users', entityId: leader.id, after: { ...leader, passwordHash: '[REDACTED]' } });
+      let leader, leaderTempPw = null;
+
+      // Two modes: leaderMode='existing' → pick an existing team-role user; 'new' → create one
+      if (body.leaderMode === 'existing') {
+        if (!body.existingLeaderId) return cors(NextResponse.json({ error: 'Select an existing team user to promote as leader' }, { status: 400 }));
+        leader = await db.collection('users').findOne({ id: body.existingLeaderId });
+        if (!leader) return cors(NextResponse.json({ error: 'Selected user not found' }, { status: 404 }));
+        if (leader.teamId && leader.teamId !== teamId) {
+          return cors(NextResponse.json({ error: `${leader.name} is already assigned to another team. Remove them from that team first, or use "Change Leader" on that team.` }, { status: 409 }));
+        }
+        await db.collection('users').updateOne(
+          { id: leader.id },
+          { $set: { teamId, role: ROLES.TEAM, isTeamLeader: true } }
+        );
+        leader = { ...leader, teamId, role: ROLES.TEAM, isTeamLeader: true };
       } else {
-        await db.collection('users').updateOne({ id: leader.id }, { $set: { teamId, role: ROLES.TEAM, isTeamLeader: true } });
+        const leaderEmail = String(body.leaderEmail || '').toLowerCase().trim();
+        const leaderName = String(body.leaderName || '').trim();
+        if (!leaderName) return cors(NextResponse.json({ error: 'Team Leader name is required' }, { status: 400 }));
+        if (!EMAIL_RE.test(leaderEmail)) return cors(NextResponse.json({ error: 'A valid Team Leader email is required (used to create their login).' }, { status: 400 }));
+        leader = await db.collection('users').findOne({ email: leaderEmail });
+        if (leader) {
+          if (leader.teamId && leader.teamId !== teamId) {
+            return cors(NextResponse.json({ error: `A user with email ${leaderEmail} already exists and is assigned to another team.` }, { status: 409 }));
+          }
+          await db.collection('users').updateOne({ id: leader.id }, { $set: { teamId, role: ROLES.TEAM, isTeamLeader: true } });
+        } else {
+          leaderTempPw = genPassword(10);
+          leader = {
+            id: uuidv4(),
+            username: leaderEmail,
+            name: leaderName,
+            email: leaderEmail,
+            mobile: (body.leaderMobile || '').trim() || null,
+            role: ROLES.TEAM,
+            teamId,
+            isTeamLeader: true,
+            passwordHash: hashPw(leaderTempPw),
+            mustChangePassword: true,
+            isDemo: false,
+            createdBy: user.id, createdAt: new Date(),
+          };
+          await db.collection('users').insertOne(leader);
+          await audit(db, { userId: user.id, action: 'auto_create_team_leader', entityType: 'users', entityId: leader.id, after: { ...leader, passwordHash: '[REDACTED]' } });
+        }
       }
 
-      // Build members list — include leader by default (with salary if admin provided)
+      // Build members list — include leader by default
       const rawMembers = Array.isArray(body.members) ? body.members : [];
       const cleanedMembers = rawMembers
         .filter(m => (m?.name || '').trim())
@@ -554,8 +572,7 @@ async function handle(request, { params }) {
           dailySalary: Number(m.dailySalary) || 0,
           userId: m.userId || null,
         }));
-      // Ensure leader is a member (dedupe by userId or email match)
-      const leaderInList = cleanedMembers.some(m => m.userId === leader.id || (m.contact && leader.mobile && m.contact.replace(/\D/g, '') === leader.mobile));
+      const leaderInList = cleanedMembers.some(m => m.userId === leader.id);
       if (!leaderInList) {
         cleanedMembers.unshift({
           id: uuidv4(),
@@ -571,7 +588,7 @@ async function handle(request, { params }) {
         name: body.name.trim(),
         leaderId: leader.id,
         leaderName: leader.name,
-        leaderEmail,
+        leaderEmail: leader.email,
         members: cleanedMembers,
         createdBy: user.id,
         createdAt: new Date(),
@@ -579,7 +596,6 @@ async function handle(request, { params }) {
       await db.collection('teams').insertOne(teamDoc);
       await audit(db, { userId: user.id, action: 'create', entityType: 'teams', entityId: teamId, after: teamDoc });
 
-      // Email leader credentials (only if we just created them)
       let leaderEmailed = false, leaderEmailError = null;
       if (leaderTempPw) {
         try {
@@ -594,6 +610,111 @@ async function handle(request, { params }) {
         } catch (e) { leaderEmailError = e.message; console.error('Team Leader welcome email failed:', e.message); }
       }
       return cors(NextResponse.json({ ...clean(teamDoc), _leaderTempPassword: leaderTempPw, _leaderEmailed: leaderEmailed, _leaderEmailError: leaderEmailError }));
+    }
+
+    // Change team leader — supports existing user or new user (auto-create)
+    const clMatch = route.match(/^\/teams\/([^/]+)\/change-leader$/);
+    if (clMatch && method === 'POST') {
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      const teamId = clMatch[1];
+      const team = await db.collection('teams').findOne({ id: teamId });
+      if (!team) return cors(NextResponse.json({ error: 'Team not found' }, { status: 404 }));
+      const body = await request.json();
+
+      let newLeader, newLeaderTempPw = null;
+      if (body.leaderMode === 'existing') {
+        if (!body.existingLeaderId) return cors(NextResponse.json({ error: 'Select a user to promote as leader' }, { status: 400 }));
+        newLeader = await db.collection('users').findOne({ id: body.existingLeaderId });
+        if (!newLeader) return cors(NextResponse.json({ error: 'Selected user not found' }, { status: 404 }));
+        if (newLeader.teamId && newLeader.teamId !== teamId) {
+          return cors(NextResponse.json({ error: `${newLeader.name} is already assigned to another team. Please detach them first.` }, { status: 409 }));
+        }
+      } else {
+        const leaderEmail = String(body.leaderEmail || '').toLowerCase().trim();
+        const leaderName = String(body.leaderName || '').trim();
+        if (!leaderName) return cors(NextResponse.json({ error: 'Team Leader name is required' }, { status: 400 }));
+        if (!EMAIL_RE.test(leaderEmail)) return cors(NextResponse.json({ error: 'A valid email is required to create the new leader\'s login.' }, { status: 400 }));
+        newLeader = await db.collection('users').findOne({ email: leaderEmail });
+        if (newLeader) {
+          if (newLeader.teamId && newLeader.teamId !== teamId) {
+            return cors(NextResponse.json({ error: `A user with email ${leaderEmail} already exists on another team.` }, { status: 409 }));
+          }
+        } else {
+          newLeaderTempPw = genPassword(10);
+          newLeader = {
+            id: uuidv4(),
+            username: leaderEmail, name: leaderName, email: leaderEmail,
+            mobile: (body.leaderMobile || '').trim() || null,
+            role: ROLES.TEAM, teamId, isTeamLeader: true,
+            passwordHash: hashPw(newLeaderTempPw), mustChangePassword: true,
+            isDemo: false, createdBy: user.id, createdAt: new Date(),
+          };
+          await db.collection('users').insertOne(newLeader);
+          await audit(db, { userId: user.id, action: 'auto_create_team_leader', entityType: 'users', entityId: newLeader.id, after: { ...newLeader, passwordHash: '[REDACTED]' } });
+        }
+      }
+
+      // Demote old leader if different
+      if (team.leaderId && team.leaderId !== newLeader.id) {
+        await db.collection('users').updateOne({ id: team.leaderId }, { $set: { isTeamLeader: false } });
+      }
+      // Promote new leader
+      await db.collection('users').updateOne(
+        { id: newLeader.id },
+        { $set: { teamId, role: ROLES.TEAM, isTeamLeader: true } }
+      );
+
+      // Update team members: add new leader if not present; retain everything else
+      const members = Array.isArray(team.members) ? [...team.members] : [];
+      if (!members.some(m => m.userId === newLeader.id)) {
+        members.unshift({
+          id: uuidv4(),
+          name: newLeader.name,
+          contact: newLeader.mobile || '',
+          dailySalary: Number(body.leaderDailySalary) || 0,
+          userId: newLeader.id,
+        });
+      }
+
+      const updated = {
+        leaderId: newLeader.id,
+        leaderName: newLeader.name,
+        leaderEmail: newLeader.email,
+        members,
+        updatedAt: new Date(),
+      };
+      await db.collection('teams').updateOne({ id: teamId }, { $set: updated });
+      await audit(db, { userId: user.id, action: 'change_leader', entityType: 'teams', entityId: teamId, before: { leaderId: team.leaderId, leaderName: team.leaderName }, after: { leaderId: newLeader.id, leaderName: newLeader.name } });
+
+      let emailed = false, emailError = null;
+      if (newLeaderTempPw) {
+        try {
+          const { sendNotificationEmail } = await import('@/lib/mailer');
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+          const emailBody = `You have been assigned as Team Leader of <b>${team.name}</b> by ${user.name}.<br/><br/>
+            <b>Username:</b> ${newLeader.username}<br/>
+            <b>Temporary password:</b> <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace">${newLeaderTempPw}</code><br/><br/>
+            You will be asked to set your own password on first login.`;
+          await sendNotificationEmail({ to: newLeader.email, subject: `You are now Team Leader — ${team.name}`, name: newLeader.name, body: emailBody, cta: { url: baseUrl, label: 'Sign in to FINLIT360' } });
+          emailed = true;
+        } catch (e) { emailError = e.message; }
+      } else if (team.leaderId !== newLeader.id) {
+        // Existing user promoted — notify but no credentials needed
+        try {
+          const { sendNotificationEmail } = await import('@/lib/mailer');
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+          await sendNotificationEmail({ to: newLeader.email, subject: `You are now Team Leader — ${team.name}`, name: newLeader.name, body: `${user.name} has assigned you as Team Leader of <b>${team.name}</b>. All team data and future assignments are now under your leadership.`, cta: { url: baseUrl, label: 'Open FINLIT360' } });
+          emailed = true;
+        } catch (e) { emailError = e.message; }
+      }
+
+      return cors(NextResponse.json({
+        success: true,
+        team: clean(await db.collection('teams').findOne({ id: teamId })),
+        _leaderTempPassword: newLeaderTempPw,
+        _leaderEmailed: emailed,
+        _leaderEmailError: emailError,
+      }));
     }
 
     // Generic CRUD for these collections

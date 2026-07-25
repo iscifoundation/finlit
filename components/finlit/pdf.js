@@ -57,62 +57,59 @@ async function ensureBrandingLogos() {
   if (typeof window === 'undefined') return;
   if (window.__FINLIT_LOGOS_LOADED__) return;
   window.__FINLIT_LOGOS_LOADED__ = true;
-  const [isci, nabard] = await Promise.all([
-    loadLogoDataUrl('/isci-logo.png'),
+  const [mpgb, nabard, isci] = await Promise.all([
+    loadLogoDataUrl('/mpgb-logo.png'),
     loadLogoDataUrl('/nabard-logo.png'),
+    loadLogoDataUrl('/isci-logo.png'),
   ]);
-  if (isci) window.__FINLIT_ISCI_LOGO__ = isci;
+  if (mpgb)   window.__FINLIT_MPGB_LOGO__   = mpgb;
   if (nabard) window.__FINLIT_NABARD_LOGO__ = nabard;
+  if (isci)   window.__FINLIT_ISCI_LOGO__   = isci;
 }
 
 // Green tone used for header/footer bands (from reference report)
 const BRAND_GREEN = { r: 46, g: 125, b: 90 };
 
-// Draw the top branding band (ISCI logo left, title center, NABARD logo right).
-// If /public/logo-isci.png and /public/logo-nabard.png exist, they will be rendered as images;
-// otherwise coloured text placeholders are drawn in the same slots so layout is stable.
+// Draw the top branding band — MPGB logo left, title center, NABARD logo right.
 function brandingHeader(doc, opts = {}) {
   const title = opts.title || 'FINANCIAL LITERACY PROGRAM - EVENT REPORT';
-  // Header band background
-  doc.setFillColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
-  doc.rect(0, 0, 210, 26, 'F');
-  // Left logo placeholder area (ISCI)
-  if (window.__FINLIT_ISCI_LOGO__) {
-    try { doc.addImage(window.__FINLIT_ISCI_LOGO__, 'PNG', 8, 3, 20, 20); } catch (e) { /* placeholder below */ }
-  } else {
-    doc.setFillColor(255, 255, 255); doc.circle(18, 13, 9, 'F');
-    doc.setFontSize(8); doc.setTextColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b); doc.setFont('helvetica', 'bold');
-    doc.text('ISCI', 18, 15, { align: 'center' });
+  // Header band background (white with a bottom accent line)
+  doc.setFillColor(255, 255, 255);
+  doc.rect(0, 0, 210, 30, 'F');
+  doc.setDrawColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
+  doc.setLineWidth(1.2);
+  doc.line(0, 30, 210, 30);
+  // Left logo (MPGB / partner bank)
+  if (window.__FINLIT_MPGB_LOGO__) {
+    try { doc.addImage(window.__FINLIT_MPGB_LOGO__, 'PNG', 10, 4, 22, 22); } catch (e) { /* skip */ }
   }
-  // Right logo placeholder area (NABARD)
+  // Right logo (NABARD)
   if (window.__FINLIT_NABARD_LOGO__) {
-    try { doc.addImage(window.__FINLIT_NABARD_LOGO__, 'PNG', 182, 3, 20, 20); } catch (e) { /* placeholder below */ }
-  } else {
-    doc.setFillColor(255, 255, 255); doc.circle(192, 13, 9, 'F');
-    doc.setFontSize(7); doc.setTextColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b); doc.setFont('helvetica', 'bold');
-    doc.text('NABARD', 192, 15, { align: 'center' });
+    try { doc.addImage(window.__FINLIT_NABARD_LOGO__, 'PNG', 178, 4, 22, 22); } catch (e) { /* skip */ }
   }
   // Centered title
-  doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
-  doc.text(title, 105, 15, { align: 'center' });
+  doc.setTextColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+  doc.text(title, 105, 17, { align: 'center' });
   doc.setTextColor(0);
 }
 
-// Draw the bottom branding band ("Implemented & Submitted By: ISCI FOUNDATION, GWALIOR")
+// Draw the bottom branding band — ISCI logo left + "Implemented & Submitted By: ISCI FOUNDATION, GWALIOR"
 function brandingFooter(doc) {
-  doc.setFillColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
-  doc.rect(0, 275, 210, 22, 'F');
+  // Bottom accent line
+  doc.setDrawColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
+  doc.setLineWidth(1.2);
+  doc.line(0, 268, 210, 268);
+  // ISCI logo
   if (window.__FINLIT_ISCI_LOGO__) {
-    try { doc.addImage(window.__FINLIT_ISCI_LOGO__, 'PNG', 8, 279, 15, 15); } catch (e) { /* placeholder below */ }
-  } else {
-    doc.setFillColor(255, 255, 255); doc.circle(16, 286, 7, 'F');
-    doc.setFontSize(7); doc.setTextColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b); doc.setFont('helvetica', 'bold');
-    doc.text('ISCI', 16, 288, { align: 'center' });
+    try { doc.addImage(window.__FINLIT_ISCI_LOGO__, 'PNG', 10, 272, 22, 22); } catch (e) { /* skip */ }
   }
-  doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
-  doc.text('Implemented & Submitted By:', 32, 283);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  doc.text('ISCI FOUNDATION, GWALIOR', 32, 290);
+  // Footer text
+  doc.setTextColor(80); doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text('Implemented & Submitted By:', 40, 280);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+  doc.setTextColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
+  doc.text('ISCI FOUNDATION, GWALIOR', 40, 288);
   doc.setTextColor(0);
 }
 

@@ -97,6 +97,31 @@ async function seedIfEmpty(db) {
     console.log('[FINLIT360] Cleared legacy demo/random seed data');
   }
 
+  // ONE-TIME migration v2: backfill sequential FLC/2627/### codes per RO by createdAt
+  const codeMigFlag = await db.collection('settings').findOne({ key: 'programCodesResequenced_v1' });
+  if (!codeMigFlag) {
+    const ros = await db.collection('regional_offices').find({}).toArray();
+    let total = 0;
+    for (const ro of ros) {
+      const progs = await db.collection('programs').find({ roId: ro.id }).sort({ createdAt: 1 }).toArray();
+      for (let i = 0; i < progs.length; i++) {
+        const seq = i + 1;
+        const code = `FLC/2627/${String(seq).padStart(3, '0')}`;
+        await db.collection('programs').updateOne(
+          { id: progs[i].id },
+          { $set: { seq, code, codeMigratedAt: now } }
+        );
+        total++;
+      }
+    }
+    await db.collection('settings').updateOne(
+      { key: 'programCodesResequenced_v1' },
+      { $set: { key: 'programCodesResequenced_v1', value: true, at: now, migrated: total } },
+      { upsert: true }
+    );
+    console.log(`[FINLIT360] Re-sequenced ${total} program codes to FLC/2627/###`);
+  }
+
   // Ensure primary admin exists (idempotent) — with username=Admin / password=Password / mustChangePassword=true
   const primary = await db.collection('users').findOne({ $or: [{ username: PRIMARY_ADMIN_USERNAME }, { email: PRIMARY_ADMIN_EMAIL }] });
   if (!primary) {
@@ -851,9 +876,14 @@ async function handle(request, { params }) {
       const ro = await db.collection('regional_offices').findOne({ id: district.roId });
       const team = await db.collection('teams').findOne({ id: body.teamId });
       if (!team) return cors(NextResponse.json({ error: 'Selected team not found' }, { status: 400 }));
+      // Sequential per-RO code (FLC/2627/001, FLC/2627/002, ...)
+      const existingCount = await db.collection('programs').countDocuments({ roId: ro.id });
+      const nextSeq = existingCount + 1;
+      const code = `FLC/2627/${String(nextSeq).padStart(3, '0')}`;
       const prog = {
         id: uuidv4(),
-        code: `FLC-${Math.floor(Math.random() * 9000) + 1000}`,
+        code,
+        seq: nextSeq,
         bankId: ro.bankId, roId: ro.id,
         districtId: district.id, branchId: branch.id,
         villageId: body.villageId, teamId: body.teamId,
@@ -874,6 +904,41 @@ async function handle(request, { params }) {
       const roUsers = await db.collection('users').find({ role: ROLES.REGIONAL_OFFICE, roId: ro.id }).toArray();
       await notify(db, roUsers.map(u => u.id), { type: 'new_program', title: 'New program created', message: `${prog.code} awaiting branch confirmation`, programId: prog.id });
       return cors(NextResponse.json(clean(prog)));
+    }
+
+    // ---- DELETE PROGRAM (Admin / PM) — resequences codes for the same RO ----
+    const delMatch = route.match(/^\/programs\/([^/]+)$/);
+    if (delMatch && method === 'DELETE') {
+      if (![ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role)) return cors(NextResponse.json({ error: 'Forbidden' }, { status: 403 }));
+      const pid = delMatch[1];
+      const prog = await db.collection('programs').findOne({ id: pid });
+      if (!prog) return cors(NextResponse.json({ error: 'Program not found' }, { status: 404 }));
+      // Require explicit "DELETE" confirmation from client
+      let confirmToken = '';
+      try { const b = await request.json(); confirmToken = String(b?.confirm || ''); } catch (e) { /* body optional */ }
+      if (confirmToken !== 'DELETE') {
+        return cors(NextResponse.json({ error: 'To confirm deletion, POST { "confirm": "DELETE" } in the request body' }, { status: 400 }));
+      }
+      // Cannot delete a program already tied to an issued invoice
+      if (prog.invoiceId) {
+        return cors(NextResponse.json({ error: 'Cannot delete — this program is included in an invoice. Remove it from the invoice first.' }, { status: 409 }));
+      }
+      const roId = prog.roId;
+      await db.collection('programs').deleteOne({ id: pid });
+      await audit(db, { userId: user.id, action: 'delete_program', entityType: 'programs', entityId: pid, before: prog });
+      // Resequence the remaining programs in the same RO by createdAt
+      const remaining = await db.collection('programs').find({ roId }).sort({ createdAt: 1 }).toArray();
+      for (let i = 0; i < remaining.length; i++) {
+        const newSeq = i + 1;
+        const newCode = `FLC/2627/${String(newSeq).padStart(3, '0')}`;
+        if (remaining[i].seq !== newSeq || remaining[i].code !== newCode) {
+          await db.collection('programs').updateOne(
+            { id: remaining[i].id },
+            { $set: { seq: newSeq, code: newCode, updatedAt: new Date() } }
+          );
+        }
+      }
+      return cors(NextResponse.json({ success: true, resequenced: remaining.length }));
     }
 
     // /programs/:id and /programs/:id/:action

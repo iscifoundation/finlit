@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { api, STATUS, ROLES, ROLE_LABELS, inr } from '@/lib/finlit/api';
-import { ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck, PlayCircle, MapPin, Calendar, Users, Camera, Download, Wallet, Building2, Clock, UsersRound, ImageIcon, X as XIcon, Edit3 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck, PlayCircle, MapPin, Calendar, Users, Camera, Download, Wallet, Building2, Clock, UsersRound, ImageIcon, X as XIcon, Edit3, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadProgramPdf } from './pdf';
 
@@ -49,6 +49,17 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
     setBusy(false);
   };
 
+  const doDelete = async () => {
+    setBusy(true);
+    try {
+      await api(`/programs/${id}`, { method: 'DELETE', body: JSON.stringify({ confirm: 'DELETE' }) });
+      toast.success('Program deleted — remaining programs re-sequenced');
+      setDialog(null); setFd({});
+      onBack();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
   // Available actions based on role & status
   const actions = [];
   if (p.status === 'proposed' || p.status === 'change_requested') {
@@ -83,6 +94,10 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
   }
   if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role) && p.status === 'authenticated') {
     actions.push({ k: 'unauthenticate', label: 'Request Re-authentication', Icon: RefreshCw, variant: 'outline' });
+  }
+  // Delete program — Admin / PM, any status except when tied to an invoice
+  if ([ROLES.ADMIN, ROLES.PROGRAM_MANAGER].includes(user.role) && !p.invoiceId) {
+    actions.push({ k: 'delete-program', label: 'Delete Program', Icon: Trash2, variant: 'outline' });
   }
   const canSeeExpense = [ROLES.ADMIN, ROLES.PROGRAM_MANAGER, ROLES.TEAM].includes(user.role);
   const canPdf = ['conducted', 'authenticated'].includes(p.status);
@@ -214,18 +229,35 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
               </div>
             </div>
           )}
+          {dialog === 'delete-program' && (
+            <div className="space-y-3">
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
+                <div className="font-semibold mb-1">This will permanently delete program {p.code}.</div>
+                <div className="text-xs">All photos, timeline entries, attendance and expense linkage for this program will be lost. Any programs after this one in the sequence will shift up (e.g. #005 → #004). This cannot be undone.</div>
+              </div>
+              <div>
+                <Label>Type <b>DELETE</b> in capitals to confirm <span className="text-red-500">*</span></Label>
+                <Input value={fd.confirm || ''} onChange={e => setFd({ ...fd, confirm: e.target.value })} placeholder="DELETE" autoComplete="off" />
+              </div>
+            </div>
+          )}
           {dialog === 'authenticate' && <div className="text-sm text-slate-600">Confirm this program is verified? It will be visible to Regional Office and can be included in an invoice.</div>}
           {dialog === 'unauthenticate' && <div><Label>Reason</Label><Textarea value={fd.reason || ''} onChange={e => setFd({ reason: e.target.value })} /></div>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
             <Button
+              variant={dialog === 'delete-program' ? 'destructive' : 'default'}
               onClick={() => {
                 if (dialog === 'assign-team' && !fd.teamId) return toast.error('Select a team');
+                if (dialog === 'delete-program') {
+                  if (fd.confirm !== 'DELETE') return toast.error('Type DELETE (in capitals) exactly to confirm');
+                  return doDelete();
+                }
                 doAction(dialog === 'confirm-pm' ? 'confirm' : dialog, fd);
               }}
               disabled={busy}
             >
-              {dialog === 'assign-team' ? 'Change Team' : 'Confirm'}
+              {dialog === 'assign-team' ? 'Change Team' : dialog === 'delete-program' ? 'Delete Program' : 'Confirm'}
             </Button>
           </DialogFooter>
         </DialogContent>

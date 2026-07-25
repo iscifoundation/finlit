@@ -37,6 +37,85 @@ function header(doc) {
   doc.line(15, 36, 195, 36);
 }
 
+// Cache & lazy-loader for branding logos placed in /public
+// Users can drop `isci-logo.png` and `nabard-logo.png` in /app/public and they'll be picked up automatically.
+async function loadLogoDataUrl(publicPath) {
+  return new Promise(resolve => {
+    fetch(publicPath).then(r => {
+      if (!r.ok) return resolve(null);
+      return r.blob().then(b => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(b);
+      });
+    }).catch(() => resolve(null));
+  });
+}
+
+async function ensureBrandingLogos() {
+  if (typeof window === 'undefined') return;
+  if (window.__FINLIT_LOGOS_LOADED__) return;
+  window.__FINLIT_LOGOS_LOADED__ = true;
+  const [isci, nabard] = await Promise.all([
+    loadLogoDataUrl('/isci-logo.png'),
+    loadLogoDataUrl('/nabard-logo.png'),
+  ]);
+  if (isci) window.__FINLIT_ISCI_LOGO__ = isci;
+  if (nabard) window.__FINLIT_NABARD_LOGO__ = nabard;
+}
+
+// Green tone used for header/footer bands (from reference report)
+const BRAND_GREEN = { r: 46, g: 125, b: 90 };
+
+// Draw the top branding band (ISCI logo left, title center, NABARD logo right).
+// If /public/logo-isci.png and /public/logo-nabard.png exist, they will be rendered as images;
+// otherwise coloured text placeholders are drawn in the same slots so layout is stable.
+function brandingHeader(doc, opts = {}) {
+  const title = opts.title || 'FINANCIAL LITERACY PROGRAM - EVENT REPORT';
+  // Header band background
+  doc.setFillColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
+  doc.rect(0, 0, 210, 26, 'F');
+  // Left logo placeholder area (ISCI)
+  if (window.__FINLIT_ISCI_LOGO__) {
+    try { doc.addImage(window.__FINLIT_ISCI_LOGO__, 'PNG', 8, 3, 20, 20); } catch (e) { /* placeholder below */ }
+  } else {
+    doc.setFillColor(255, 255, 255); doc.circle(18, 13, 9, 'F');
+    doc.setFontSize(8); doc.setTextColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b); doc.setFont('helvetica', 'bold');
+    doc.text('ISCI', 18, 15, { align: 'center' });
+  }
+  // Right logo placeholder area (NABARD)
+  if (window.__FINLIT_NABARD_LOGO__) {
+    try { doc.addImage(window.__FINLIT_NABARD_LOGO__, 'PNG', 182, 3, 20, 20); } catch (e) { /* placeholder below */ }
+  } else {
+    doc.setFillColor(255, 255, 255); doc.circle(192, 13, 9, 'F');
+    doc.setFontSize(7); doc.setTextColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b); doc.setFont('helvetica', 'bold');
+    doc.text('NABARD', 192, 15, { align: 'center' });
+  }
+  // Centered title
+  doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
+  doc.text(title, 105, 15, { align: 'center' });
+  doc.setTextColor(0);
+}
+
+// Draw the bottom branding band ("Implemented & Submitted By: ISCI FOUNDATION, GWALIOR")
+function brandingFooter(doc) {
+  doc.setFillColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
+  doc.rect(0, 275, 210, 22, 'F');
+  if (window.__FINLIT_ISCI_LOGO__) {
+    try { doc.addImage(window.__FINLIT_ISCI_LOGO__, 'PNG', 8, 279, 15, 15); } catch (e) { /* placeholder below */ }
+  } else {
+    doc.setFillColor(255, 255, 255); doc.circle(16, 286, 7, 'F');
+    doc.setFontSize(7); doc.setTextColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b); doc.setFont('helvetica', 'bold');
+    doc.text('ISCI', 16, 288, { align: 'center' });
+  }
+  doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+  doc.text('Implemented & Submitted By:', 32, 283);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+  doc.text('ISCI FOUNDATION, GWALIOR', 32, 290);
+  doc.setTextColor(0);
+}
+
 function footer(doc) {
   const total = doc.internal.getNumberOfPages();
   for (let i = 1; i <= total; i++) {
@@ -73,19 +152,15 @@ function fitContain(imgW, imgH, boxW, boxH) {
 }
 
 export async function downloadProgramPdf(p, refs) {
+  await ensureBrandingLogos();
   const doc = new jsPDF();
-  header(doc);
+  brandingHeader(doc, { title: 'FINANCIAL LITERACY PROGRAM - EVENT REPORT' });
 
   const dateStr = p.conductedAt || p.proposedDate;
   const formattedDate = dateStr ? new Date(dateStr).toLocaleDateString('en-IN') : '';
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.setTextColor(0);
-  doc.text('FINANCIAL LITERACY CAMP - PROGRAM REPORT', 105, 43, { align: 'center' });
 
-  // Compact details in TWO columns to save vertical space
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
+  // Compact details in TWO columns (below the header band). Team is NOT included.
+  doc.setFontSize(9); doc.setFont('helvetica', 'normal');
   const details = [
     ['Program ID', p.code],
     ['Bank', refs.bank?.name],
@@ -98,7 +173,7 @@ export async function downloadProgramPdf(p, refs) {
     ['Participants', p.participants || 0],
     ['Status', (p.status || '').replace('_', ' ')],
   ];
-  let y = 50;
+  let y = 36;
   for (let i = 0; i < details.length; i += 2) {
     const [l1, v1] = details[i];
     const [l2, v2] = details[i + 1] || ['', ''];
@@ -123,28 +198,25 @@ export async function downloadProgramPdf(p, refs) {
   if (photos.length) {
     y += 3;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0);
-    doc.text('Photo Evidence', 20, y);
+    doc.text('Pictures of the Event', 20, y);
     y += 4;
     const gridStartY = y;
-    const boxW = 82;   // mm — fits two side-by-side within margin
-    const boxH = 55;   // mm — reasonable slot height; images letterboxed to preserve their own aspect
+    const boxW = 82;
+    const boxH = 52;
     const gapX = 5;
-    const gapY = 12;   // accounts for caption line under each photo
+    const gapY = 12;
     for (let i = 0; i < photos.length; i++) {
       const ph = photos[i];
       const row = Math.floor(i / 2);
       const col = i % 2;
       const boxX = 20 + col * (boxW + gapX);
       const boxY = gridStartY + row * (boxH + gapY);
-      // Slot background
       doc.setFillColor(245, 247, 250);
       doc.rect(boxX, boxY, boxW, boxH, 'F');
-      // Compute fit
       let dim = { w: 16, h: 9 };
       try { dim = await loadDim(ph.data); } catch (e) { /* fallback */ }
       const f = fitContain(dim.w, dim.h, boxW, boxH);
       try { doc.addImage(ph.data, 'JPEG', boxX + f.dx, boxY + f.dy, f.w, f.h); } catch (e) { /* skip */ }
-      // Caption below the slot
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(90);
       let cap = `Photo ${i + 1}`;
       if (ph.gps?.lat != null && ph.gps?.lng != null) cap += ` | GPS ${(+ph.gps.lat).toFixed(4)}, ${(+ph.gps.lng).toFixed(4)}`;
@@ -155,17 +227,16 @@ export async function downloadProgramPdf(p, refs) {
     y = gridStartY + Math.ceil(photos.length / 2) * (boxH + gapY);
   }
 
-  // Signature — always on the same first page
-  doc.setDrawColor(220); doc.line(20, y + 2, 190, y + 2);
-  y += 10;
-  doc.setFontSize(9); doc.setTextColor(80);
-  doc.text('Authenticated for and on behalf of', 20, y);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0);
-  doc.text(ISCI.name, 20, y + 5);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-  doc.text(`${ISCI.director},  For ISCI Foundation Director`, 20, y + 10);
+  // Authentication line (WITHOUT the director's name / designation)
+  y += 4;
+  doc.setDrawColor(220); doc.line(20, y, 190, y);
+  y += 6;
+  doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(80);
+  doc.text('Authenticated for and on behalf of ISCI Foundation.', 20, y);
+  doc.setTextColor(0); doc.setFont('helvetica', 'normal');
 
-  footer(doc);
+  // Footer branding band
+  brandingFooter(doc);
   const fname = [refs.ro?.name, refs.district?.name, refs.branch?.name, refs.village?.name, formattedDate].filter(Boolean).join('_').replace(/\s+/g, '_') + '.pdf';
   doc.save(fname);
 }
@@ -256,23 +327,21 @@ export function downloadInvoicePdf(inv, refs) {
 }
 
 export async function downloadROReportPdf(programs, refs, options = {}) {
+  await ensureBrandingLogos();
   const { includePhotos = true } = options;
   const doc = new jsPDF();
-  header(doc);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text('AUTHENTICATED PROGRAMS - CONSOLIDATED REPORT', 105, 46, { align: 'center' });
+  brandingHeader(doc, { title: 'AUTHENTICATED PROGRAMS - CONSOLIDATED REPORT' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.text(`Regional Office: ${refs.ro?.name || ''}`, 20, 54);
-  if (refs.bank?.name) doc.text(`Bank: ${refs.bank.name}`, 20, 60);
-  doc.text(`Report Date: ${new Date().toLocaleDateString('en-IN')}`, 20, 66);
-  doc.text(`Total Programs: ${programs.length}`, 20, 72);
+  doc.text(`Regional Office: ${refs.ro?.name || ''}`, 20, 36);
+  if (refs.bank?.name) doc.text(`Bank: ${refs.bank.name}`, 20, 42);
+  doc.text(`Report Date: ${new Date().toLocaleDateString('en-IN')}`, 20, 48);
+  doc.text(`Total Programs: ${programs.length}`, 20, 54);
   const totalBenef = programs.reduce((s, p) => s + (p.participants || 0), 0);
-  doc.text(`Total Beneficiaries: ${totalBenef.toLocaleString('en-IN')}`, 20, 78);
+  doc.text(`Total Beneficiaries: ${totalBenef.toLocaleString('en-IN')}`, 20, 60);
 
   autoTable(doc, {
-    startY: 84,
+    startY: 66,
     head: [['S.No.', 'Code', 'Date', 'District', 'Branch', 'Village', 'Participants']],
     body: programs.map((p, i) => {
       const b = refs.branches?.find(x => x.id === p.branchId)?.name || '';
@@ -286,8 +355,10 @@ export async function downloadROReportPdf(programs, refs, options = {}) {
       ];
     }),
     styles: { fontSize: 8.5, cellPadding: 2 },
-    headStyles: { fillColor: [20, 40, 90], textColor: 255 },
+    headStyles: { fillColor: [BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b], textColor: 255 },
+    margin: { bottom: 30 },
   });
+  brandingFooter(doc);
 
   // Per-program detail — ONE page per program, aspect preserved
   if (includePhotos) {
@@ -297,13 +368,9 @@ export async function downloadROReportPdf(programs, refs, options = {}) {
       const d = refs.districts?.find(x => x.id === p.districtId);
       const v = refs.villages?.find(x => x.id === p.villageId);
       doc.addPage();
-      header(doc);
+      brandingHeader(doc, { title: `${p.code} - EVENT REPORT` });
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12);
-      doc.text(`Program ${idx + 1} of ${programs.length} — ${p.code}`, 105, 43, { align: 'center' });
-
-      // Compact 2-col details
+      // Compact 2-col details (no Team field)
       doc.setFontSize(9); doc.setFont('helvetica', 'normal');
       const dateStr = p.conductedAt || p.proposedDate;
       const details = [
@@ -316,7 +383,7 @@ export async function downloadROReportPdf(programs, refs, options = {}) {
         ['Participants', p.participants || 0],
         ['Status', (p.status || '').replace('_', ' ')],
       ];
-      let y = 50;
+      let y = 36;
       for (let i = 0; i < details.length; i += 2) {
         const [l1, v1] = details[i];
         const [l2, v2] = details[i + 1] || ['', ''];
@@ -340,9 +407,9 @@ export async function downloadROReportPdf(programs, refs, options = {}) {
       if (photos.length) {
         y += 3;
         doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0);
-        doc.text('Photo Evidence', 20, y); y += 4;
+        doc.text('Pictures of the Event', 20, y); y += 4;
         const gridStartY = y;
-        const boxW = 82, boxH = 55, gapX = 5, gapY = 12;
+        const boxW = 82, boxH = 52, gapX = 5, gapY = 12;
         for (let i = 0; i < photos.length; i++) {
           const ph = photos[i];
           const row = Math.floor(i / 2);
@@ -362,34 +429,37 @@ export async function downloadROReportPdf(programs, refs, options = {}) {
           doc.text(cap, boxX, boxY + boxH + 4);
           doc.setTextColor(0);
         }
+        y = gridStartY + Math.ceil(photos.length / 2) * (boxH + gapY);
       } else {
         doc.setFontSize(9); doc.setTextColor(150);
         doc.text('No photo evidence available', 20, y + 6);
         doc.setTextColor(0);
       }
+
+      // Authentication line (no director name/designation)
+      y += 4;
+      doc.setDrawColor(220); doc.line(20, y, 190, y);
+      y += 6;
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(80);
+      doc.text('Authenticated for and on behalf of ISCI Foundation.', 20, y);
+      doc.setTextColor(0); doc.setFont('helvetica', 'normal');
+
+      brandingFooter(doc);
     }
   }
 
-  // Final signature page
+  // Final signature page (also without director name/designation)
   doc.addPage();
-  header(doc);
-  doc.setFontSize(10);
+  brandingHeader(doc, { title: 'Report Summary' });
+  doc.setFontSize(11); doc.setTextColor(0); doc.setFont('helvetica', 'normal');
   doc.text('This report is authenticated by ISCI Foundation.', 105, 60, { align: 'center' });
   doc.text(`Total programs conducted and authenticated: ${programs.length}`, 105, 68, { align: 'center' });
   doc.text(`Total beneficiaries reached: ${totalBenef.toLocaleString('en-IN')}`, 105, 76, { align: 'center' });
+  doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(80);
+  doc.text('Authenticated for and on behalf of ISCI Foundation.', 105, 100, { align: 'center' });
+  doc.setTextColor(0);
 
-  doc.setFontSize(9); doc.setTextColor(80);
-  doc.text('Authenticated for and on behalf of', 130, 210);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0);
-  doc.text(ISCI.name, 130, 218);
-  doc.setDrawColor(180); doc.rect(130, 222, 60, 12);
-  doc.setTextColor(150); doc.setFontSize(7);
-  doc.text('(Signature / Seal)', 160, 229, { align: 'center' });
-  doc.setTextColor(0); doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-  doc.text(ISCI.director, 130, 240);
-  doc.text('For ISCI Foundation, Director', 130, 245);
-
-  footer(doc);
+  brandingFooter(doc);
   const roName = (refs.ro?.name || 'RO').replace(/\s+/g, '_');
   doc.save(`${roName}_ConsolidatedReport_${new Date().toISOString().slice(0, 10)}.pdf`);
 }

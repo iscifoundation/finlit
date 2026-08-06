@@ -131,10 +131,41 @@ function loadDim(src) {
   return new Promise(resolve => {
     if (!src) return resolve({ w: 16, h: 9 });
     const img = new window.Image();
+    img.crossOrigin = 'anonymous';
     img.onload = () => resolve({ w: img.naturalWidth || 16, h: img.naturalHeight || 9 });
     img.onerror = () => resolve({ w: 16, h: 9 });
     img.src = src;
   });
+}
+
+// Fetch a remote image (e.g. Cloudinary URL) and convert to data URL so jsPDF can embed it.
+// If input is already a data URL, returns as-is.
+async function toDataUrl(src) {
+  if (!src) return null;
+  if (src.startsWith('data:')) return src;
+  try {
+    const res = await fetch(src, { mode: 'cors' });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onloadend = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn('toDataUrl failed for', src, e.message);
+    return null;
+  }
+}
+
+// Resolve a photo record to a usable image data URL and dimensions. Prefers `.url` (Cloudinary), falls back to legacy `.data`.
+async function resolvePhoto(ph) {
+  const src = ph.url || ph.data;
+  if (!src) return { dataUrl: null, dim: { w: 16, h: 9 } };
+  const dataUrl = await toDataUrl(src);
+  const dim = await loadDim(dataUrl || src);
+  return { dataUrl, dim };
 }
 
 // Fit (imgW × imgH) inside (boxW × boxH) preserving aspect ratio.
@@ -191,7 +222,7 @@ export async function downloadProgramPdf(p, refs) {
   }
 
   // Photos — 2×2 grid on the SAME page, aspect-ratio preserved (no stretching)
-  const photos = (p.photos || []).filter(ph => ph.data).slice(0, 4);
+  const photos = (p.photos || []).filter(ph => ph.url || ph.data).slice(0, 4);
   if (photos.length) {
     y += 3;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0);
@@ -202,18 +233,26 @@ export async function downloadProgramPdf(p, refs) {
     const boxH = 52;
     const gapX = 5;
     const gapY = 12;
+    // Preload all photos in parallel (fetch Cloudinary URL → data URL)
+    const resolved = await Promise.all(photos.map(resolvePhoto));
     for (let i = 0; i < photos.length; i++) {
       const ph = photos[i];
+      const { dataUrl, dim } = resolved[i];
       const row = Math.floor(i / 2);
       const col = i % 2;
       const boxX = 20 + col * (boxW + gapX);
       const boxY = gridStartY + row * (boxH + gapY);
       doc.setFillColor(245, 247, 250);
       doc.rect(boxX, boxY, boxW, boxH, 'F');
-      let dim = { w: 16, h: 9 };
-      try { dim = await loadDim(ph.data); } catch (e) { /* fallback */ }
       const f = fitContain(dim.w, dim.h, boxW, boxH);
-      try { doc.addImage(ph.data, 'JPEG', boxX + f.dx, boxY + f.dy, f.w, f.h); } catch (e) { /* skip */ }
+      if (dataUrl) {
+        try { doc.addImage(dataUrl, 'JPEG', boxX + f.dx, boxY + f.dy, f.w, f.h); } catch (e) { /* skip */ }
+      } else {
+        // Fallback marker if the Cloudinary URL failed to fetch (CORS / network)
+        doc.setFontSize(8); doc.setTextColor(150);
+        doc.text('[image unavailable]', boxX + boxW / 2, boxY + boxH / 2, { align: 'center' });
+        doc.setTextColor(0);
+      }
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(90);
       let cap = `Photo ${i + 1}`;
       if (ph.gps?.lat != null && ph.gps?.lng != null) cap += ` | GPS ${(+ph.gps.lat).toFixed(4)}, ${(+ph.gps.lng).toFixed(4)}`;
@@ -400,25 +439,31 @@ export async function downloadROReportPdf(programs, refs, options = {}) {
         y += 5 + Math.min(lines.length, 2) * 4;
       }
 
-      const photos = (p.photos || []).filter(ph => ph.data).slice(0, 4);
+      const photos = (p.photos || []).filter(ph => ph.url || ph.data).slice(0, 4);
       if (photos.length) {
         y += 3;
         doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0);
         doc.text('Pictures of the Event', 20, y); y += 4;
         const gridStartY = y;
         const boxW = 82, boxH = 52, gapX = 5, gapY = 12;
+        const resolved = await Promise.all(photos.map(resolvePhoto));
         for (let i = 0; i < photos.length; i++) {
           const ph = photos[i];
+          const { dataUrl, dim } = resolved[i];
           const row = Math.floor(i / 2);
           const col = i % 2;
           const boxX = 20 + col * (boxW + gapX);
           const boxY = gridStartY + row * (boxH + gapY);
           doc.setFillColor(245, 247, 250);
           doc.rect(boxX, boxY, boxW, boxH, 'F');
-          let dim = { w: 16, h: 9 };
-          try { dim = await loadDim(ph.data); } catch (e) { /* fallback */ }
           const f = fitContain(dim.w, dim.h, boxW, boxH);
-          try { doc.addImage(ph.data, 'JPEG', boxX + f.dx, boxY + f.dy, f.w, f.h); } catch (e) { /* skip */ }
+          if (dataUrl) {
+            try { doc.addImage(dataUrl, 'JPEG', boxX + f.dx, boxY + f.dy, f.w, f.h); } catch (e) { /* skip */ }
+          } else {
+            doc.setFontSize(8); doc.setTextColor(150);
+            doc.text('[image unavailable]', boxX + boxW / 2, boxY + boxH / 2, { align: 'center' });
+            doc.setTextColor(0);
+          }
           doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(90);
           let cap = `Photo ${i + 1}`;
           if (ph.gps?.lat != null && ph.gps?.lng != null) cap += ` | GPS ${(+ph.gps.lat).toFixed(4)}, ${(+ph.gps.lng).toFixed(4)}`;

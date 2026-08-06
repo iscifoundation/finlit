@@ -1025,7 +1025,25 @@ async function handle(request, { params }) {
           if (!prog.branchConfirmed && user.role === ROLES.TEAM) return cors(NextResponse.json({ error: 'Program must be confirmed by Branch Manager first' }, { status: 400 }));
           if (prog.status === 'authenticated') return cors(NextResponse.json({ error: 'Program is authenticated. Ask Admin to request re-authentication before editing.' }, { status: 409 }));
           const payload = {};
-          if (body.photos) payload.photos = body.photos.map(p => ({ id: uuidv4(), data: p.data, gps: p.gps || null, source: p.source || 'camera', uploadedAt: new Date() }));
+          if (body.photos) {
+            // Enforce Cloudinary-URL-only payloads to keep the API tiny and eliminate 520 errors.
+            for (const p of body.photos) {
+              const url = String(p?.url || '').trim();
+              if (!url) return cors(NextResponse.json({ error: 'photos[].url is required (upload directly to Cloudinary, then send only the URL + GPS)' }, { status: 400 }));
+              if (!/^https?:\/\//i.test(url)) return cors(NextResponse.json({ error: 'photos[].url must be an http(s) URL' }, { status: 400 }));
+            }
+            payload.photos = body.photos.map(p => ({
+              id: uuidv4(),
+              url: String(p.url).trim(),
+              publicId: p.publicId || null,
+              width: p.width || null,
+              height: p.height || null,
+              bytes: p.bytes || null,
+              gps: p.gps || null,
+              source: p.source || 'camera',
+              uploadedAt: new Date(),
+            }));
+          }
           if (body.participants !== undefined) payload.participants = +body.participants;
           if (body.expenses) payload.expenses = body.expenses;
           if (body.teamPayments) payload.teamPayments = body.teamPayments;

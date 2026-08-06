@@ -11,6 +11,55 @@ import { api, ROLES } from '@/lib/finlit/api';
 import { ArrowLeft, Camera, Image as ImageIcon, MapPin, Users, Wallet, Send, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
+// Compress a file toward a target byte size by iteratively lowering JPEG quality.
+async function compressToTarget(file, targetBytes = 500 * 1024, maxW = 1600) {
+  return new Promise(resolve => {
+    const r = new FileReader();
+    r.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        const scale = Math.min(1, maxW / img.width);
+        c.width = img.width * scale; c.height = img.height * scale;
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        // Try progressively lower quality until under target size
+        let quality = 0.85;
+        let dataUrl = c.toDataURL('image/jpeg', quality);
+        let attempts = 0;
+        // dataUrl size in bytes ≈ (length - header) * 3/4
+        const size = (d) => Math.floor((d.length - 'data:image/jpeg;base64,'.length) * 3 / 4);
+        while (size(dataUrl) > targetBytes && quality > 0.35 && attempts < 8) {
+          quality -= 0.1;
+          dataUrl = c.toDataURL('image/jpeg', quality);
+          attempts++;
+        }
+        // Convert dataUrl -> Blob for multipart upload
+        fetch(dataUrl).then(res => res.blob()).then(blob => resolve({ blob, quality, size: blob.size }));
+      };
+      img.src = e.target.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+
+// Upload one image blob directly to Cloudinary (unsigned).
+async function uploadToCloudinary(blob) {
+  const cloud = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'o5sh6ccg';
+  const preset = process.env.NEXT_PUBLIC_CLOUDINARY_PRESET || 'finlit_photos';
+  const fd = new FormData();
+  fd.append('file', blob);
+  fd.append('upload_preset', preset);
+  fd.append('folder', 'finlit360');
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloud}/image/upload`, { method: 'POST', body: fd });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Cloudinary upload failed (${res.status}): ${txt.slice(0, 200)}`);
+  }
+  const json = await res.json();
+  return { url: json.secure_url, publicId: json.public_id, width: json.width, height: json.height, bytes: json.bytes };
+}
+
+// Legacy — kept for compatibility with any code still expecting base64
 async function compress(file, maxW = 1400, q = 0.75) {
   return new Promise(resolve => {
     const r = new FileReader();
@@ -38,6 +87,7 @@ export default function ProgramExecuteView({ id, user, onBack }) {
   const [expenses, setExpenses] = useState({ taxi: 0, food: 0, refreshments: 0, stationary: 0, other: 0 });
   const [remarks, setRemarks] = useState('');
   const [busy, setBusy] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null); // { current, total }
   const camRef = useRef(null);
   const galRef = useRef(null);
 
@@ -76,20 +126,41 @@ export default function ProgramExecuteView({ id, user, onBack }) {
   const upload = async (source, files) => {
     if (!files?.length) return;
     setBusy(true);
+    setUploadProgress({ current: 0, total: files.length });
     try {
       const data = [];
-      // In edit mode, use reused GPS queue first (from deleted photos), then fall back to base gps
       const queue = [...reusedGpsQueue];
+      let i = 0;
       for (const f of files) {
+        i++;
+        setUploadProgress({ current: i - 1, total: files.length, stage: 'compress' });
+        // 1. Compress toward ≤500KB target
+        const { blob } = await compressToTarget(f, 500 * 1024, 1600);
+        setUploadProgress({ current: i - 1, total: files.length, stage: 'upload' });
+        // 2. Upload directly to Cloudinary (bypasses our API entirely — fixes 520s)
+        const uploaded = await uploadToCloudinary(blob);
+        // 3. Pick GPS: reused-queue first (edit mode), then base gps
         let photoGps = gps;
         if (isEditMode && queue.length > 0) photoGps = queue.shift();
-        data.push({ data: await compress(f), gps: photoGps, source });
+        // 4. Assemble tiny payload — URL + GPS only, no image bytes
+        data.push({
+          url: uploaded.url,
+          publicId: uploaded.publicId,
+          width: uploaded.width,
+          height: uploaded.height,
+          bytes: uploaded.bytes,
+          gps: photoGps,
+          source,
+        });
+        setUploadProgress({ current: i, total: files.length, stage: 'done' });
       }
+      // 5. Save metadata to backend (tiny JSON, no images)
       const r = await api(`/programs/${id}/upload-data`, { method: 'POST', body: JSON.stringify({ photos: data }) });
       setP(r);
       setReusedGpsQueue(queue);
-      toast.success(`${data.length} photo${data.length>1?'s':''} uploaded`);
+      toast.success(`${data.length} photo${data.length>1?'s':''} uploaded to Cloudinary`);
     } catch (e) { toast.error(e.message); }
+    setUploadProgress(null);
     setBusy(false);
   };
 
@@ -174,11 +245,12 @@ export default function ProgramExecuteView({ id, user, onBack }) {
           <div className="grid grid-cols-4 gap-2 mb-3">
             {Array.from({ length: Math.max(4, photoCount) }).map((_, i) => {
               const ph = p.photos?.[i];
+              const src = ph?.url || ph?.data || null;
               return (
                 <div key={i} className="aspect-square rounded-lg border-2 border-dashed border-slate-200 overflow-hidden bg-slate-50 relative">
-                  {ph?.data ? (
+                  {src ? (
                     <>
-                      <img src={ph.data} alt="" className="w-full h-full object-cover" />
+                      <img src={src} alt="" className="w-full h-full object-cover" />
                       <button onClick={() => deletePhoto(ph.id)} className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"><X className="w-3 h-3" /></button>
                     </>
                   ) : (
@@ -188,6 +260,13 @@ export default function ProgramExecuteView({ id, user, onBack }) {
               );
             })}
           </div>
+          {uploadProgress && (
+            <div className="mb-3 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md p-2">
+              {uploadProgress.stage === 'compress' && `Compressing photo ${uploadProgress.current + 1} of ${uploadProgress.total}...`}
+              {uploadProgress.stage === 'upload' && `Uploading photo ${uploadProgress.current + 1} of ${uploadProgress.total} to Cloudinary...`}
+              {uploadProgress.stage === 'done' && `Uploaded ${uploadProgress.current} of ${uploadProgress.total}`}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <input ref={camRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={e => upload('camera', e.target.files)} />
             <input ref={galRef} type="file" accept="image/*" multiple hidden onChange={e => upload('gallery', e.target.files)} />

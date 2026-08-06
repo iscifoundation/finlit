@@ -141,21 +141,23 @@ export default function ProgramDetailView({ id, user, onBack, onExecute }) {
               <div>
                 <div className="flex items-center gap-2 mb-2"><Camera className="w-4 h-4 text-slate-500" /><div className="text-sm font-medium">Photos ({p.photos.length}/4)</div></div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {p.photos.map((ph, i) => (
+                  {p.photos.map((ph, i) => {
+                    const src = ph.url || ph.data;
+                    return (
                     <button
                       type="button"
                       key={ph.id}
-                      onClick={() => ph.data && setLightbox({ src: ph.data, index: i, gps: ph.gps })}
+                      onClick={() => src && setLightbox({ src, index: i, gps: ph.gps })}
                       className="group relative aspect-video rounded-lg border overflow-hidden bg-slate-50 hover:ring-2 hover:ring-primary/40 focus:outline-none focus:ring-2 focus:ring-primary transition"
                     >
-                      {ph.data
-                        ? <img src={ph.data} alt={`Photo ${i+1}`} className="w-full h-full object-cover" />
+                      {src
+                        ? <img src={src} alt={`Photo ${i+1}`} className="w-full h-full object-cover" />
                         : <div className="w-full h-full flex items-center justify-center text-slate-300"><Camera className="w-6 h-6" /></div>}
                       <div className="absolute top-1.5 left-1.5 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded">#{i+1}</div>
                       {ph.gps && <div className="absolute bottom-1.5 left-1.5 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded">📍 {(+ph.gps.lat).toFixed(4)}, {(+ph.gps.lng).toFixed(4)}</div>}
-                      {ph.data && <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition"><ImageIcon className="w-6 h-6 text-white drop-shadow" /></div>}
+                      {src && <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition"><ImageIcon className="w-6 h-6 text-white drop-shadow" /></div>}
                     </button>
-                  ))}
+                  );})}
                 </div>
               </div>
             )}

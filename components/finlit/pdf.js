@@ -297,10 +297,13 @@ export function downloadInvoicePdf(inv, refs) {
   doc.setFontSize(9);
   const addr = (inv.billTo?.address || '').split(',').map(s => s.trim()).filter(Boolean);
   const bankName = refs.bank?.name || '';
-  doc.text(bankName, 20, 58);
-  addr.forEach((line, i) => doc.text(line, 20, 63 + i * 5));
+  const roName = inv.billTo?.name || refs.ro?.name || '';
+  let toY = 58;
+  doc.text(bankName, 20, toY);
+  if (roName) { toY += 5; doc.text(roName, 20, toY); }
+  addr.forEach((line, i) => doc.text(line, 20, toY + 5 + i * 5));
 
-  const startY = 63 + addr.length * 5 + 8;
+  const startY = toY + 5 + addr.length * 5 + 8;
   doc.setFontSize(9);
   doc.text('Dear Sir,', 20, startY);
   const intro = doc.splitTextToSize('This is with reference to the Financial Literacy Camps conducted by ISCI Foundation on your behalf. Kindly find below the details of the camps completed. As agreed, please make the required payment against the below activities. The relevant documentation for the said activities has been attached.', 175);

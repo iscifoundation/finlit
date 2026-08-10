@@ -184,7 +184,7 @@ export async function downloadProgramPdf(p, refs) {
   const doc = new jsPDF();
   brandingHeader(doc, { title: 'FINANCIAL LITERACY PROGRAM - EVENT REPORT' });
 
-  const dateStr = p.conductedAt || p.proposedDate;
+  const dateStr = p.proposedDate;
   const formattedDate = dateStr ? new Date(dateStr).toLocaleDateString('en-IN') : '';
 
   // Compact details in TWO columns (below the header band). Team is NOT included.
@@ -386,7 +386,7 @@ export async function downloadROReportPdf(programs, refs, options = {}) {
       return [
         i + 1,
         p.code,
-        p.conductedAt ? new Date(p.conductedAt).toLocaleDateString('en-IN') : (p.proposedDate ? new Date(p.proposedDate).toLocaleDateString('en-IN') : ''),
+        p.proposedDate ? new Date(p.proposedDate).toLocaleDateString('en-IN') : '',
         d, b, v, p.participants || 0,
       ];
     }),
@@ -408,7 +408,7 @@ export async function downloadROReportPdf(programs, refs, options = {}) {
 
       // Compact 2-col details (no Team field)
       doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-      const dateStr = p.conductedAt || p.proposedDate;
+      const dateStr = p.proposedDate;
       const details = [
         ['Regional Office', refs.ro?.name],
         ['State', d?.state],

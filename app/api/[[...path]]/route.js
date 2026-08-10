@@ -1109,7 +1109,7 @@ async function handle(request, { params }) {
         const village = await db.collection('villages').findOne({ id: p.villageId });
         items.push({
           id: uuidv4(), programId: p.id, program: 'Financial Literacy Camp',
-          date: p.conductedAt || p.proposedDate, branch: branch?.name || '', village: village?.name || '',
+          date: p.proposedDate, branch: branch?.name || '', village: village?.name || '',
           amount: fee,
         });
       }

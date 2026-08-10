@@ -192,8 +192,7 @@ function InvoiceDetail({ id, user, banks, ros, onBack }) {
         <Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
         <span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">{inv.invoiceNumber}</span>
         <div className="ml-auto flex gap-2 flex-wrap">
-          <Button size="sm" variant="outline" onClick={() => downloadInvoicePdf(inv, { bank })}><Download className="w-4 h-4 mr-1" />PDF</Button>
-          {canEdit && !editing && <Button size="sm" variant="outline" onClick={() => setEditing(true)}><Edit className="w-4 h-4 mr-1" />Edit</Button>}
+          <Button size="sm" variant="outline" onClick={() => downloadInvoicePdf(inv, { bank, ro })}><Download className="w-4 h-4 mr-1" />PDF</Button>          {canEdit && !editing && <Button size="sm" variant="outline" onClick={() => setEditing(true)}><Edit className="w-4 h-4 mr-1" />Edit</Button>}
           {canEdit && editing && <Button size="sm" onClick={save}><Save className="w-4 h-4 mr-1" />Save</Button>}
           {canEdit && <Button size="sm" variant="outline" onClick={() => setPayOpen(true)}><Wallet className="w-4 h-4 mr-1" />Record Payment</Button>}
           {canEdit && <Button size="sm" variant="ghost" onClick={deleteInv}><Trash2 className="w-4 h-4" /></Button>}
@@ -216,6 +215,7 @@ function InvoiceDetail({ id, user, banks, ros, onBack }) {
                 <Input value={inv.billTo?.title || ''} onChange={e => setInv({ ...inv, billTo: { ...inv.billTo, title: e.target.value } })} />
               ) : <div>{inv.billTo?.title}</div>}
               <div className="font-semibold">{bank?.name}</div>
+              {(ro?.name || inv.billTo?.name) && <div>{ro?.name || inv.billTo?.name}</div>}
               {editing ? (
                 <Input value={inv.billTo?.address || ''} onChange={e => setInv({ ...inv, billTo: { ...inv.billTo, address: e.target.value } })} className="mt-1" />
               ) : <div className="text-slate-600">{inv.billTo?.address}</div>}

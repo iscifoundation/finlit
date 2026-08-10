@@ -1100,8 +1100,14 @@ async function handle(request, { params }) {
       const { roId, programIds, invoiceNumber, invoiceDate, notes } = await request.json();
       const ro = await db.collection('regional_offices').findOne({ id: roId });
       if (!ro) return cors(NextResponse.json({ error: 'RO not found' }, { status: 400 }));
-      const progs = await db.collection('programs').find({ id: { $in: programIds || [] } }).toArray();
+       const progs = await db.collection('programs').find({ id: { $in: programIds || [] } }).toArray();
       if (!progs.length) return cors(NextResponse.json({ error: 'No programs selected' }, { status: 400 }));
+      // Order programs by proposed date (ascending) so the invoice lists them chronologically
+      progs.sort((a, b) => {
+        const da = a.proposedDate ? new Date(a.proposedDate).getTime() : 0;
+        const db2 = b.proposedDate ? new Date(b.proposedDate).getTime() : 0;
+        return da - db2;
+      });
       const fee = ro.feePerProgram || 0;
       const items = [];
       for (const p of progs) {
